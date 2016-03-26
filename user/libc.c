@@ -123,34 +123,17 @@ int read( int fd, void* x, size_t n ) {
   return r;
 }
 
-int dwrite( int a, void* x, size_t n ) {
-  int r;
+int fopen( const char *path ) {
+  int fd;
 
   asm volatile( "mov r0, %1 \n"
-                "mov r1, %2 \n"
-                "mov r2, %3 \n"
                 "svc #11    \n"
                 "mov %0, r0 \n" 
-              : "=r" (r) 
-              : "r" (a), "r" (x), "r" (n) 
-              : "r0", "r1", "r2" );
+              : "=r" (fd) 
+              : "r" (path) 
+              : "r0"            );
 
-  return r;
-}
-
-int dread( int a, void* x, size_t n ) {
-  int r;
-
-  asm volatile( "mov r0, %1 \n"
-                "mov r1, %2 \n"
-                "mov r2, %3 \n"
-                "svc #12    \n"
-                "mov %0, r0 \n" 
-              : "=r" (r) 
-              : "r" (a), "r" (x), "r" (n) 
-              : "r0", "r1", "r2" );
-
-  return r;
+  return fd;
 }
 
 // =========================
@@ -188,4 +171,18 @@ char* int2str( int value, char* str, int base ) {
 
   str[c] = '\0';
   return str;
+}
+
+void write_int( int fd, int x ) {
+  char buf[12];
+
+  int2str( x, buf, 10 );
+
+  int n;
+  for (n = 0; n < 12; n++) {
+    if (buf[ n ] == '\0') {
+      write( fd, buf, n);
+      return;
+    }
+  }
 }

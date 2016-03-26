@@ -33,14 +33,14 @@ void msgreceive( int mqd, void* buf );
 int write( int fd, void* x, size_t n );
 int read( int fd, void* x, size_t n );
 
-// writes/reads n bytes from x to address a
-int dwrite( int a, void* x, size_t n);
-int dread( int a, void* x, size_t n);
+// filesystem functions
+int fopen( const char *path );
 
 // =========================
 // === HELPFUL FUNCTIONS ===
 // =========================
 
 char* int2str( int value, char* str, int base );
+void write_int( int fd, int x );
 
 #endif

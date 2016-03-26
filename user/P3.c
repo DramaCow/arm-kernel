@@ -1,22 +1,14 @@
 #include "P3.h"
 
 void P3() {
-  int data = 0x7FFFFFFF; // 2147483647;
+  //int data = 0x7FFFFFFF; // 2147483647;
+  int *ptr;
+  *ptr = 5;
 
-  write( 0, "wipe started", 12 ); 
 
-  dwrite( 0x0, &data, 4 );
-  
-  /*
-  int data2;
-  dread( 0x0, &data2, 4 );
+  const int FILE = fopen( "/file.txt" );  
 
-  char buf[12];
-  int2str( data2, buf, 10 );
-  write( 0, buf, strlen(buf) );
-  */
-
-  write( 0, "disk wiped", 10 );
+  write_int( 0, FILE ); // success!
 
   /*
 

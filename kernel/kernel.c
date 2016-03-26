@@ -255,6 +255,16 @@ void wipe() {
   }
 
   disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) );
+
+  icommon_t ic[ 8 ]; 
+  for (int i = 0; i < 64; i++) {
+    disk_rd( i + fs.fs_iblkno, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
+    for (int j = 0; j < 8; j++) {
+      ic[ j ].ic_mode = i == 0 && j == 2 ? IFDIR : IFZERO;
+      ic[ j ].ic_size = 1513;
+    }
+    disk_wr( i + fs.fs_iblkno, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
+  }  
 }
 
 daddr32_t balloc() { // block allocation
@@ -299,19 +309,33 @@ inode_t* getInode( inode_t *in, int ino ) {
 
 	in->i_number = ino;
 	in->i_ic		 = ic[ r ];
-	
+  //memcpy( &in->i_ic, &ic[ r ], sizeof( icommon_t ) );	
+
 	return in;
 }
 
-inode_t* getFreeInode( inode_t *in ) {
+inode_t * addInode( inode_t *inode ) {
+  const int q = inode->i_number / 8;
+	const int r = inode->i_number % 8;
+	
+	icommon_t ic[ 8 ];
+	disk_rd( fs.fs_iblkno + q, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
+
+  ic[ r ] = inode->i_ic;
+  disk_wr( fs.fs_iblkno + q, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
+	
+	return inode;
+} 
+
+inode_t * getFreeInode( inode_t *in ) {
 	icommon_t ic[ 8 ];
 	for (int i = 0; i < fs.fs_isize/8; i++) {
 		disk_rd( fs.fs_iblkno + i, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
 		for (int j = 0; j < 8; j++) {
 			// icommon is unused
 			if (ic[ j ].ic_mode == IFZERO) {
-				in->i_number = 8*i + j;
-				in->i_ic     = ic[ j ];
+				in->i_number     = 8*i + j;
+        in->i_ic.ic_mode = IFREG;
 				// TODO: reset icommon metadata
 				return in;
 			}
@@ -319,43 +343,58 @@ inode_t* getFreeInode( inode_t *in ) {
 	}
 
 	// no available inodes
-	in = NULL;
-	return in;
+	return NULL;
 }
 
-void addInode( inode_t* par, uint32_t ino, const char *name ) {
-	const int d     = (par->i_ic.ic_size / 32) + 1;  // which directory
-	const int q     = d / 16;				     						 // which block 
-	const int r		  = d % 16;			       						 // offset in block
+void addInodeToDirectory( inode_t* par, uint32_t ino, const char *name ) {
+	const int d     = par->i_ic.ic_size / 32;  // which directory
+	const int q     = d / 16;				     			 // which block 
+	const int r		  = d % 16;			       			 // offset in block
 	
+  /* TODO:
+   *  directory needs to get available block from fs list
+   */
+
+  par->i_ic.ic_size += 32; // add new directory
+
+  if (r == 0) { // need to allocate a new block
+    par->i_ic.ic_db[ q ] = balloc();
+  }
+
 	dir_t dir[ 16 ];	
 	disk_rd( par->i_ic.ic_db[ q ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
 
-	dir[ r ] = (dir_t){ ino, strlen( name ), *name };
+	//dir[ r ] = (dir_t){ ino, strlen( name ), name };
+  dir[ r ].d_ino    = ino;
+  dir[ r ].d_namlen = strlen( name );
+  strncpy( dir[ r ].d_name, name, strlen( name ) ); 
 	disk_wr( par->i_ic.ic_db[ q ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
 }
 
 int name_to_ino( const char *name, const inode_t *in ) {
 	const int bytes = in->i_ic.ic_size; // number of bytes
 	const int dirs  = bytes / 32;       // number of directories
-	const int blks  = dirs / 16;				// number of blocks
-	const int r		  = dirs % 16;			  // offset in last block
+
+  if (dirs > 0) {
+	  const int blks  = dirs / 16;				// number of blocks
+	  const int r		  = dirs % 16;			  // offset in last block
 	
-	dir_t dir[ 16 ];
+	  dir_t dir[ 16 ];
 
-	for (int i = 0; i < blks; i++) {
-		disk_rd( in->i_ic.ic_db[ i ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
-		for (int j = 0; j < 16; j++) {
-			if (strncmp(name, dir[j].d_name, strlen(name)) == 0)
-				return dir[j].d_ino;
-		}
-	}
+	  for (int i = 0; i < blks-1; i++) {
+		  disk_rd( in->i_ic.ic_db[ i ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
+		  for (int j = 0; j < 16; j++) {
+			  if (strncmp(name, dir[j].d_name, strlen(name)) == 0)
+				  return dir[j].d_ino;
+		  }
+	  }
 
-	disk_rd( in->i_ic.ic_db[ blks ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
-	for (int j = 0; j < r; j++) {
-		if (strncmp(name, dir[j].d_name, strlen(name)) == 0)
-			return dir[j].d_ino;
-	}
+	  disk_rd( in->i_ic.ic_db[ blks-1 ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
+	  for (int j = 0; j < r; j++) {
+		  if (strncmp(name, dir[j].d_name, strlen(name)) == 0)
+			  return dir[j].d_ino;
+	  }
+  }
 
 	/*
 	 * TODO: deal with indirect blocks as well
@@ -365,92 +404,86 @@ int name_to_ino( const char *name, const inode_t *in ) {
 }
 
 int path_to_ino( const char *path ) {
-	inode_t *in;
+	inode_t  inode;
 	int 		 ino0,  ino = ROOT_DIR;
 	char 	  *tok0, *tok;
 
 	for (tok0 = tok = strtok( (char*)path, "/" ); 
 			 tok != NULL && ino != -1; 
-			 tok = strtok( NULL, "/" ) ) {
-		getInode( in, ino ); 					 // first iteration will give us root directory
+			 tok = strtok( NULL, "/" ) ) 
+  {
+		getInode( &inode, ino ); 			     // first iteration will give us root directory
 
 		ino0 = ino;
-		ino  = name_to_ino( tok, in ); // if ino is valid (>-1) then there must exist a corresponding valid inode
+		ino  = name_to_ino( tok, &inode ); // if ino is valid, then there must exist a corresponding valid inode
 
-		tok0 = tok;                    // tok0 will be name of file upon termination, if path is valid
+		tok0 = tok;                        // tok0 will be name of file upon termination, if path is valid
 	} 
 	
 	if (tok != NULL && ino == -1) {
 		return -1; // path doesn't exist
 	}
-	else if (ino == -1) {
+	else if (tok == NULL && ino == -1) {
 		// create new inode and return corresponding ino
-		getFreeInode( in );
-
-		// check there exists available inode for return
-		if (in == NULL) // TODO: return -1 instead of NULL
+		if (getFreeInode( &inode ) == NULL) // check assigned inode correctly
 			return -2;
 
-		// add new inode to parent directory (assumes new inode is not a directory)
-		inode_t *parent;
-		getInode( parent, ino0 );
-		addInode( parent, ino, tok0 );
+    // write new inode to disk
+    addInode( &inode );
 
-		return in->i_number;
+		// add new inode to parent directory (assumes new inode is not a directory)
+		inode_t parent;
+		getInode( &parent, ino0 );
+		addInodeToDirectory( &parent, inode.i_number, tok0 ); // TODO: parent will get written to 
+                                                          //       - thus assumes parent is not in AIT (since is a dir.)
+
+		return inode.i_number;
 	}
 
   return ino; 
 }
 
-int open( const char *path/*, int oflag, ...*/) {
-  // find valid file descriptor  
-  int fd;  
-
-  for (fd = 0; fd < FDT_LIMIT; fd++) {
+int getFD() {
+  // find valid file descriptor table entry
+  for (int fd = 0; fd < FDT_LIMIT; fd++) {
     if (current->fd[ fd ] == NULL)
       return fd;
   }
-  if (fd >= FDT_LIMIT) 
-		return -1; // table full
 
-	// get ino of file at given path
-	int ino = path_to_ino( path );
-	if (ino < 0) 
-		return -1; // unvalid path or no more inodes
-	
-	// find valid AIT entry
-	inode_t *inode = NULL; // pointer to be used by OFT entry
-	int zero = AIT_LIMIT;  // keep record of lowest valid empty table entry
+  return -1; // table full 
+}
 
-	for (int i = 0; i < AIT_LIMIT; i++) {
-		if (ai[ i ].i_ic.ic_mode == IFZERO)
-			zero = ai[ i ].i_number < zero ? ai[ i ].i_number : zero;
-
-		if (ai[ i ].i_number == ino) {
-			inode = &ai[ i ];
-			break;
-		}
-	}	
-	if (inode == NULL) { 			// there does not already exist a table entry with given ino 
-		if (zero < AIT_LIMIT) { // there exists valid AIT entry
-			getInode( inode, ino );
-			ai[ zero ] = *inode; // TODO: check if inode gets cleared by stack!!!
-		}
-		else
-			return -1; // not enough space to add inode to table entry (should this be able to occur???)
-	}
-
-	// find valid OFT entry and grab the pointer to it
-	ofile_t *ofile = NULL;
-
+ofile_t * getOFT() {
+  // find valid OFT entry and grab the pointer to it
 	for (int i = 0; i < OFT_LIMIT; i++) {
-		if (of[ i ].o_inptr == NULL) { // OFT entry is free for use
-			ofile = &of[ i ];
-			break;
-		}
+		if (of[ i ].o_inptr == NULL)
+			return &of[ i ];
 	}
-	if (ofile == NULL) 
-		return -1; // this probably can't happen
+
+  return NULL; // this probably can't happen
+}
+
+inode_t * getAIT( int ino ) {
+  // inode already in AIT
+	for (int i = 0; i < AIT_LIMIT; i++) {
+		if (ai[ i ].i_number == ino && ai[ i ].i_ic.ic_mode != IFZERO)
+			return &ai[ i ];
+	}	
+
+  // add inode to empty AIT entry (2nd pass)
+  for (int i = 0; i < AIT_LIMIT; i++) {
+    if (ai[ i ].i_ic.ic_mode == IFZERO)
+      return getInode( &ai[ i ], ino );
+	}	
+
+	return NULL; // table full
+}
+
+int open( const char *path/*, int oflag, ...*/) {
+  int fd = getFD();                 if (fd == -1)      return -1;
+	int ino = path_to_ino( path );    if (ino < 0)       return -1;
+  inode_t *inode = getAIT( ino );   if (inode == NULL) return -1; 
+  ofile_t *ofile = getOFT();        if (ofile == NULL) return -1;	
 
 	// link FDT entry to OFT entry
 	current->fd[ fd ] = ofile;
@@ -480,6 +513,7 @@ void kernel_handler_rst( ctx_t* ctx ) {
   rq_size = 1;
 
 	// superblock defined at block address 1
+  wipe();
 	disk_rd( 1, (uint8_t*)(&fs), sizeof( fs_t ) );
 
   TIMER0->Timer1Load     = 0x00100000; // select period = 2^20 ticks ~= 1 sec
@@ -596,12 +630,9 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id, int a1, int a2 ) {
     case 0x0b: {
       ///*       block addr     data pointer             byte length   */
       //disk_wr( ctx->gpr[ 0 ], (uint8_t*)ctx->gpr[ 1 ], ctx->gpr[ 2 ] );
-      wipe();
-      break;
-    }
-    case 0x0c: {
-      /*       block addr     data pointer             byte length   */
-      disk_rd( ctx->gpr[ 0 ], (uint8_t*)ctx->gpr[ 1 ], ctx->gpr[ 2 ] );
+      //wipe();
+      char* path = ( char* )( ctx->gpr[ 0 ] );  
+      ctx->gpr[ 0 ] = open( path );
       break;
     }
     default   : { // unknown
