@@ -265,6 +265,8 @@ void wipe() {
     }
     disk_wr( i + fs.fs_iblkno, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
   }  
+
+  return;
 }
 
 daddr32_t balloc() { // block allocation
@@ -404,6 +406,9 @@ int name_to_ino( const char *name, const inode_t *in ) {
 }
 
 int path_to_ino( const char *path ) {
+  icommon_t itest[ 8 ];
+  disk_rd( 2, (uint8_t*)itest, 8 * sizeof( icommon_t ) );
+
 	inode_t  inode;
 	int 		 ino0,  ino = ROOT_DIR;
 	char 	  *tok0, *tok;
@@ -514,7 +519,7 @@ void kernel_handler_rst( ctx_t* ctx ) {
 
 	// superblock defined at block address 1
   wipe();
-	disk_rd( 1, (uint8_t*)(&fs), sizeof( fs_t ) );
+	disk_rd( 1, (uint8_t*)(&fs), sizeof( fs_t ) ); // TODO: investigate padding
 
   TIMER0->Timer1Load     = 0x00100000; // select period = 2^20 ticks ~= 1 sec
   TIMER0->Timer1Ctrl     = 0x00000002; // select 32-bit   timer

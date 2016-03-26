@@ -52,17 +52,21 @@ typedef struct {
 
   daddr32_t fs_fdb[ 64 ]; // list of free data blocks (fs_fdb[ 0 ] points to block of more free addresses, etc.)
   uint32_t  fs_fil[ 32 ]; // list of free inodes
-} fs_t; // superblock (defines the filesystem) - 408 < 512 bytes
+
+  uint8_t __pad__[100]; // usused space
+} fs_t; // superblock (defines the filesystem) - 412 < 512 bytes
 
 typedef enum {
-  IFZERO, // inode usused
-  IFLNK,  // symbolic link
-  IFDIR,  // directory
-  IFREG   // regular data file
+  IFZERO = 0, // inode usused
+  IFLNK  = 1, // symbolic link
+  IFDIR  = 2, // directory
+  IFREG  = 3, // regular data file
+
+  //UNUSED = 0x7FFFFFFF // TODO: remove
 } mode_t; // icommon (on-core inode) mode / type
 
 typedef struct {
-  mode_t ic_mode;            // 0:       icommon type
+  uint32_t ic_mode;          // 0:       icommon type
   uint32_t ic_size;          // 4:       size of icommon in bytes (ignores fragments)
   daddr32_t ic_db[ NDADDR ]; // 8  - 48: direct   blocks
   daddr32_t ic_ib[ NIADDR ]; // 52 - 60: indirect blocks

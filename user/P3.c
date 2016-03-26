@@ -2,9 +2,6 @@
 
 void P3() {
   //int data = 0x7FFFFFFF; // 2147483647;
-  int *ptr;
-  *ptr = 5;
-
 
   const int FILE = fopen( "/file.txt" );  
 
