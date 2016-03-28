@@ -6,19 +6,26 @@ void P3() {
 /*  const int FILE = fopen( "/file.txt" );*/
 /*  write_int( 0, FILE ); // success!*/
 
-  int m = mqinit(100);
+  int m = 15061996;
+  write_int( 0, m );
 
-  int message = 1;
-  msgsend( m, &message );
+  yield();
 
-  msgreceive( m, &message );
-  if (message == 2) write( 0, "success2", 8 );
+  write_int( 0, m );
 
-  message = 3;
-  msgsend( m, &message );
+/*  int m = mqinit(100);*/
 
-  msgreceive( m, &message );
-  if (message == 4) write( 0, "success4", 8 );
+/*  int message = 1;*/
+/*  msgsend( m, &message );*/
+
+/*  msgreceive( m, &message );*/
+/*  if (message == 2) write( 0, "success2", 8 );*/
+
+/*  message = 3;*/
+/*  msgsend( m, &message );*/
+
+/*  msgreceive( m, &message );*/
+/*  if (message == 4) write( 0, "success4", 8 );*/
 
   cexit();
 }

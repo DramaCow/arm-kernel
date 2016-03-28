@@ -10,7 +10,9 @@
 void yield();
 
 // POSIX fork : page 882 and exec : page 772?
-int cfork( uint32_t program );
+int cfork();
+
+void cexec( uint32_t program );
 
 // exit
 void cexit();

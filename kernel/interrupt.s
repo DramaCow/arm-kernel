@@ -45,8 +45,6 @@ handler_svc: sub   lr, lr, #0              @ correct return address
              mov   r0, sp                  @ set    C function arg. = SP
              ldr   r1, [ lr, #-4 ]         @ load                     svc instruction
              bic   r1, r1, #0xFF000000     @ set    C function arg. = svc immediate
-             mov   r2, r2                  @ load                     optional argument 1 /* unnecessary mov */
-             mov   r3, r3                  @ load                     optional argument 2 /* unnecessary mov */
              bl    kernel_handler_svc      @ invoke C function
 
              ldmia sp!, { r0, lr }         @ load   USR mode PC and CPSR

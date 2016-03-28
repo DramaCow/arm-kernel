@@ -4,19 +4,26 @@ void yield() {
   asm volatile( "svc #0 \n" );
 }
 
-int cfork( uint32_t program ) {
+int cfork() {
   int f;
-  asm volatile( "mov r0, %1 \n" 
-                "svc #3     \n"
-                "mov %0, r0 \n"
+  asm volatile( "svc #3         \n"
+                "mov %0, r0     \n"
               : "=r" (f)        
-              : "r" (program)
+              : 
               : "r0"            );
   return f;
 }
 
+void cexec( uint32_t program ) {
+  asm volatile( "mov r0, %0 \n" 
+                "svc #4     \n"
+              :        
+              : "r" (program)
+              : "r0"            );
+}
+
 void cexit( void ) { // make this a raise sigkill call!
-  asm volatile( "svc #4 \n"  );
+  asm volatile( "svc #5 \n"  );
 }
 
 void ckill( int pid, sig_t sig ) { // TODO: add more signals
