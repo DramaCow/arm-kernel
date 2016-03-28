@@ -4,19 +4,15 @@ void yield() {
   asm volatile( "svc #0 \n" );
 }
 
-int cfork() {
+int cfork( uint32_t program ) {
   int f;
-  asm volatile( "svc #3     \n"
+  asm volatile( "mov r0, %1 \n" 
+                "svc #3     \n"
                 "mov %0, r0 \n"
-              : "=r" (f)        );
+              : "=r" (f)        
+              : "r" (program)
+              : "r0"            );
   return f;
-}
-
-void cexec( int p ) {
-  asm volatile( "mov r2, %0 \n"
-                "svc #5     \n"
-              :
-              : "r" (p)         );
 }
 
 void cexit( void ) { // make this a raise sigkill call!
@@ -123,11 +119,15 @@ int read( int fd, void* x, size_t n ) {
   return r;
 }
 
+void disk_wipe() {
+  asm volatile( "svc #11 \n" );
+}
+
 int fopen( const char *path ) {
   int fd;
 
   asm volatile( "mov r0, %1 \n"
-                "svc #11    \n"
+                "svc #12    \n"
                 "mov %0, r0 \n" 
               : "=r" (fd) 
               : "r" (path) 

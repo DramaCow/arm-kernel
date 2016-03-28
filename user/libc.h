@@ -9,14 +9,11 @@
 // cooperatively yield control of processor, i.e., invoke the scheduler
 void yield();
 
-// POSIX fork : page 882
-int cfork();
+// POSIX fork : page 882 and exec : page 772?
+int cfork( uint32_t program );
 
 // exit
 void cexit();
-
-// POSIX exec : page 772?
-void cexec( int p );
 
 // POSIX kill
 void ckill( int pid, sig_t sig );
@@ -34,6 +31,7 @@ int write( int fd, void* x, size_t n );
 int read( int fd, void* x, size_t n );
 
 // filesystem functions
+void disk_wipe();
 int fopen( const char *path );
 
 // =========================

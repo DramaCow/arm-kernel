@@ -35,14 +35,8 @@ void init() {
         int n = strtol( strtok(NULL, " "), NULL, 10 );
             n = n > 0 ? n : 1; // no quantity param => 1 program
 
-        int f;
         for (int i = 0; i < n; i++) {
-          f = cfork();
-
-          if (f == 0) {
-            cexec(p);
-          }
-          else if (f == -1) {
+          if (cfork(p) == -1) {
             write( 0, "\nmemory fault\n", 14 );
             break; // May not be necessary?? - memory could become free between fork calls
           }
@@ -52,6 +46,9 @@ void init() {
     }
     else if (strncmp(x, "kill", 4) == 0) {
       kill( stoi( strtok(NULL, " ") ) );
+    }
+    else if (strncmp(x, "wipe", 4) == 0) {
+      disk_wipe();
     }
     else if (strncmp(x, "quit", 4) == 0) {
       break;

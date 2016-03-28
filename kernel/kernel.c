@@ -35,7 +35,7 @@ int cmp_pcb( const void* p1, const void* p2 ) {
 // For standard round robin
 void rq_rotate() {
   pcb_t* head = rq[ 0 ];
-  int end = head == NULL ? rq_size : rq_size-1;
+  int end = head == NULL ? rq_size : rq_size-1; // TODO: ???
 
   for (int i = 0; i < end; i++) {
     rq[ i ] = rq[ i+1 ];
@@ -62,8 +62,8 @@ void readyq_rmhead() {
 } 
 
 void scheduler( ctx_t* ctx ) {
-  qsort( rq, PROCESS_LIMIT, sizeof(pcb_t*), cmp_pcb );
-  //rq_rotate();
+  //qsort( rq, PROCESS_LIMIT, sizeof(pcb_t*), cmp_pcb );
+  rq_rotate();
 
   // There exists a live program in ready queue
   if (rq[ 0 ] != NULL) {
@@ -81,55 +81,36 @@ void scheduler( ctx_t* ctx ) {
   }
 }
 
-uint32_t fork( ctx_t* ctx ) {
+uint32_t getProgramEntry( uint32_t program ) {
+  switch (program) {
+    case 0x00 : return ( uint32_t )( entry_P0 );
+    case 0x01 : return ( uint32_t )( entry_P1 );
+    case 0x02 : return ( uint32_t )( entry_P2 );
+    case 0x03 : return ( uint32_t )( entry_P3 );
+    case 0x04 : return ( uint32_t )( entry_P4 );
+  }
+  return NULL;
+}
+
+uint32_t fork_and_exec( ctx_t* ctx, uint32_t program ) {
   pid_t p; // next available pid
   for (p = 0; p < PROCESS_LIMIT; p++) {                          // lowest available pid
     if (pcb[ p ].pst == TERMINATED) {                // process block space available
-      pcb[ p ].pid          = p;                     // new id
-      pcb[ p ].prt          = current->pid;          // parent id
-      memcpy( &pcb[ p ].ctx, ctx, sizeof( ctx_t ) ); // copy current ctx to new block
-      pcb[ p ].ctx.gpr[ 0 ] = 0;                     // return value for child process
-      //pcb[ p ].ctx.pc       = current->ctx.lr;       // put parent lr into child pc (ENABLES CORRECT RETURNING)
-      pcb[ p ].ctx.sp       = ( uint32_t )(  &tos_init + ( p * 0x00001000 ) ); // Prevent stack interference
-      pcb[ p ].pst          = EXECUTING;             // process state
-      pcb[ p ].defp         = current->defp;
-      pcb[ p ].prio         = current->prio;
+      memset( &pcb[ p ], 0, sizeof( pcb_t ) );
+      pcb[ p ].pid      = p;
+      pcb[ p ].prt      = current->pid;
+      pcb[ p ].ctx.cpsr = 0x50; // processor switched into USR mode, w/ IRQ interrupts enabled
+      pcb[ p ].ctx.pc   = getProgramEntry( program );
+      pcb[ p ].ctx.sp   = ( uint32_t )(  &tos_init - ( p * 0x00001000 ) );
+      pcb[ p ].pst      = EXECUTING;
+      pcb[ p ].defp = pcb[ 0 ].prio = 10; // Higher value = lower priority; (best is 0)
+
       readyq_add(p);
 
       return p; // return value as child pid for parent process 
     }
   }
   return -1;    // error: no available memory
-}
-
-void exec( ctx_t* ctx, uint32_t program ) {
-  switch (program) {
-    case 0x00 : {
-      ctx->pc = ( uint32_t )( entry_P0   );
-      current->prio = 0;
-      break;
-    }
-    case 0x01 : {
-      ctx->pc = ( uint32_t )( entry_P1   );
-      current->prio = 0;
-      break;
-    }
-    case 0x02 : {
-      ctx->pc = ( uint32_t )( entry_P2   );
-      current->prio = 0;
-      break;
-    }
-    case 0x03 : {
-      ctx->pc = ( uint32_t )( entry_P3   );
-      current->prio = 0;
-      break;
-    }
-    case 0x04 : {
-      ctx->pc = ( uint32_t )( entry_P4   );
-      current->prio = 0;
-      break;
-    }
-  }
 }
 
 void _exit( ctx_t* ctx ) {
@@ -232,8 +213,6 @@ void wipe() {
     fs.fs_dblkno  = 66;
     fs.fs_dsize   = 1982;
     fs.fs_fdbhead = (fs.fs_dsize%64)-1;
-    //memset( fs.fs_fdb, 0, 64 * sizeof( daddr32_t ) );
-    //memset( fs.fs_fil, 0, 32 * sizeof( uint32_t  ) );
 
   daddr32_t fdb[ 64 ];
 
@@ -518,7 +497,7 @@ void kernel_handler_rst( ctx_t* ctx ) {
   rq_size = 1;
 
 	// superblock defined at block address 1
-  wipe();
+  //wipe();
 	disk_rd( 1, (uint8_t*)(&fs), sizeof( fs_t ) ); // TODO: investigate padding
 
   TIMER0->Timer1Load     = 0x00100000; // select period = 2^20 ticks ~= 1 sec
@@ -587,16 +566,12 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id, int a1, int a2 ) {
       ctx->gpr[ 0 ] = n; // unnecessary?
       break;
     }
-    case 0x03 : { // fork
-      ctx->gpr[ 0 ] = fork( ctx );
+    case 0x03 : { // fork / exec
+      ctx->gpr[ 0 ] = fork_and_exec( ctx, ctx->gpr[ 0 ] );
       break;
     }
     case 0x04 : { // exit
       _exit( ctx );
-      break;
-    }
-    case 0x05 : { // exec
-      exec( ctx, a1 );
       break;
     }
     case 0x06 : { // kill
@@ -633,6 +608,10 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id, int a1, int a2 ) {
       break;
     }
     case 0x0b: {
+      wipe();
+      break;
+    }
+    case 0x0c: {
       ///*       block addr     data pointer             byte length   */
       //disk_wr( ctx->gpr[ 0 ], (uint8_t*)ctx->gpr[ 1 ], ctx->gpr[ 2 ] );
       //wipe();
