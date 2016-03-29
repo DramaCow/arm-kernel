@@ -9,64 +9,48 @@ int program_code( char* id ) {
   else return -1;
 }
 
-int stoi( char* str ) {
-  if ('0' <= str[0] && str[0] <= '8')
-    return str[0] - 48; // '48' is 0 in ascii 
-
-  if (strncmp(str, "all", 3) == 0)
-    return 9;
-  
-  return -1; // error
-}
-
 void init() {
+
+/*  int f1 = cfork();*/
+/*  if (f1 == 0) cexec(0);*/
+
+/*  int f2 = cfork();*/
+/*  if (f2 == 0) cexec(0);*/
+
   char x[32];
-  char* tok;
-  int p = 0;
 
   while( 1 ) {
     read( 0, x, 16);
+    char* tok = strtok(x, " ");
 
-    tok = strtok(x, " ");
-    if      (strncmp(x, "run", 3) == 0) {
+    if (strncmp(tok, "run", 3) == 0) {
+      int p = program_code( strtok(NULL, " ") );   
+   
+      if (p != -1) { // if successfully found program        
+        int f = cfork();
 
-      int p = program_code( strtok(NULL, " ") );      
-      if (p != -1) { // if successfully found program  
-        int n = strtol( strtok(NULL, " "), NULL, 10 );
-            n = n > 0 ? n : 1; // no quantity param => 1 program
-
-        int f;
-        for (int i = 0; i < n; i++) {
-          f = 0;          
-          f = cfork();
-
-          if (f == 0) {
-            cexec( p );
-          }
-          else if (f == -1) {
-            write( 0, "\nmemory fault\n", 14 );
-            break; // May not be necessary?? - memory could become free between fork calls
-          }
+        if (f == 0) {
+          cexec( p );
+        }
+        else if (f == -1) {
+          write( 0, "\nmemory fault\n", 14 );
+          break; // May not be necessary?? - memory could become free between fork calls
         }
       }
-
     }
-    else if (strncmp(x, "kill", 4) == 0) {
-      kill( stoi( strtok(NULL, " ") ) );
+    else if (strncmp(tok, "kill", 4) == 0) {
+      // kill( stoi( strtok(NULL, " ") ) );
     }
-    else if (strncmp(x, "wipe", 4) == 0) {
+    else if (strncmp(tok, "wipe", 4) == 0) {
       disk_wipe();
     }
-    else if (strncmp(x, "quit", 4) == 0) {
-      break;
+    else if (strncmp(tok, "quit", 4) == 0) {
+      cexit();
+      return;
     }
 
     yield(); // gets rid of reading delay
   }
-
-  cexit();
-
-  return;
 }
 
 void (*entry_init)() = &init;

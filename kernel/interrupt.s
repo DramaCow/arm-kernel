@@ -10,8 +10,6 @@ handler_rst: bl    table_copy              @ initialise interrupt vector table
              msr   cpsr, #0xD3             @ enter SVC mode with no interrupts
              ldr   sp, =tos_svc            @ initialise SVC mode stack ( different sp reg. after mode change ? )
 
-             sub   sp, sp, #68             @ initialise dummy context
-
              mov   r0, sp                  @ set    C function arg. = SP
              bl    kernel_handler_rst      @ invoke C function
 
@@ -21,7 +19,7 @@ handler_rst: bl    table_copy              @ initialise interrupt vector table
              add   sp, sp, #60             @ update SVC mode SP
              movs  pc, lr                  @ return from interrupt
 
-handler_irq: sub   lr, lr, #0              @ correct return address       // <-- WHY?
+handler_irq: sub   lr, lr, #4              @ correct return address       // <-- WHY?
              sub   sp, sp, #60             @ update SVC mode stack        // <-- WHY?
              stmia sp, { r0-r12, sp, lr }^ @ store  USR registers
              mrs   r0, spsr                @ get    USR        CPSR       // <-- WHY?

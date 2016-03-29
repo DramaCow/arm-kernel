@@ -22,8 +22,8 @@ int cmp_pcb( const void* p1, const void* p2 ) {
   else if ( (*((pcb_t**)(p1)))->pst == TERMINATED && (*((pcb_t**)(p2)))->pst == TERMINATED ) return  0;
 
   // Higher priority goes behind lower priority
-  if      ( (*((pcb_t**)(p1)))->prio < (*((pcb_t**)(p2)))->prio ) return  1;
-  else if ( (*((pcb_t**)(p1)))->prio > (*((pcb_t**)(p2)))->prio ) return -1;
+  if      ( (*((pcb_t**)(p1)))->prio > (*((pcb_t**)(p2)))->prio ) return  1;
+  else if ( (*((pcb_t**)(p1)))->prio < (*((pcb_t**)(p2)))->prio ) return -1;
 
   // Equal priority live processes ordered by memory addr value
   if      ( p1 > p2 ) return  1;
@@ -88,6 +88,7 @@ uint32_t getProgramEntry( uint32_t program ) {
     case 0x02 : return ( uint32_t )( entry_P2 );
     case 0x03 : return ( uint32_t )( entry_P3 );
     case 0x04 : return ( uint32_t )( entry_P4 );
+    default   : return ( uint32_t )( entry_init );
   }
   return NULL;
 }
@@ -101,7 +102,7 @@ uint32_t fork( ctx_t* ctx ) {
       memcpy( &pcb[ p ].ctx, ctx, sizeof( ctx_t ));
       pcb[ p ].ctx.gpr[ 0 ]         = 0; // return value of child process
       pcb[ p ].pst                  = EXECUTING;
-      pcb[ p ].defp = pcb[ p ].prio = 10; // Higher value = lower priority; (best is 0)
+      pcb[ p ].defp = pcb[ p ].prio = 0; // Higher value = lower priority; (best is 0)
 
       readyq_add(p);
 
@@ -116,15 +117,15 @@ void exec( ctx_t* ctx, uint32_t program ) {
   int pst = current->pst;
 
   memset( current, 0, sizeof( pcb_t ) );
-  current->pid = pid;
-  current->pst = pst;
+  current->pid      = pid;
+  current->pst      = pst;
   current->ctx.cpsr = 0x50;
   current->ctx.pc   = getProgramEntry( program );
-  current->ctx.sp   = ( uint32_t )( &tos_init - current->pid * 0x00001000 );
+  current->ctx.sp   = ( uint32_t )( (uint32_t)(&tos_init) - current->pid * 0x00001000 );
   current->pst      = EXECUTING;
-  current->defp = current->prio = 10;
+  current->defp = current->prio = 9;
 
-  memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
+  //memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
 }
 
 void _exit( ctx_t* ctx ) {
@@ -132,7 +133,7 @@ void _exit( ctx_t* ctx ) {
   current->pst = TERMINATED;
 
   scheduler( ctx );
-  TIMER0->Timer1IntClr = 0x01; // reset timer
+  //TIMER0->Timer1IntClr = 0x01; // reset timer
 }
 
 void kill( pid_t pid, sig_t sig ) {
@@ -497,18 +498,31 @@ int open( const char *path/*, int oflag, ...*/) {
 // =====================================
 
 void kernel_handler_rst( ctx_t* ctx ) { 
-  memset( &pcb[ 0 ], 0, sizeof( pcb_t ) );
-  pcb[ 0 ].pid      = 0;
-  pcb[ 0 ].prt      = 0;
-  pcb[ 0 ].ctx.cpsr = 0x50; // processor switched into USR mode, w/ IRQ interrupts enabled
-  pcb[ 0 ].ctx.pc   = ( uint32_t )( entry_init );
-  pcb[ 0 ].ctx.sp   = ( uint32_t )(  &tos_init );
-  pcb[ 0 ].pst      = EXECUTING;
-  pcb[ 0 ].defp = pcb[ 0 ].prio = 10; // Higher value = lower priority; (best is 0)
+  current = &pcb[ 0 ];
+  exec( ctx, -1 );
 
-  current = &pcb[ 0 ]; memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
-  rq[0] = current;
-  rq_size = 1;
+/*  memset( &pcb[ 0 ], 0, sizeof( pcb_t ) );*/
+/*  pcb[ 0 ].pid      = 0;*/
+/*  pcb[ 0 ].prt      = 0;*/
+/*  pcb[ 0 ].ctx.cpsr = 0x50; // processor switched into USR mode, w/ IRQ interrupts enabled*/
+/*  pcb[ 0 ].ctx.pc   = ( uint32_t )( entry_P0 );*/
+/*  pcb[ 0 ].ctx.sp   = ( uint32_t )(  &tos_init );*/
+/*  pcb[ 0 ].pst      = EXECUTING;*/
+/*  pcb[ 0 ].defp = pcb[ 0 ].prio = 10; // Higher value = lower priority; (best is 0)*/
+
+/*  memset( &pcb[ 1 ], 0, sizeof( pcb_t ) );*/
+/*  pcb[ 1 ].pid      = 1;*/
+/*  pcb[ 1 ].prt      = 0;*/
+/*  pcb[ 1 ].ctx.cpsr = 0x50; // processor switched into USR mode, w/ IRQ interrupts enabled*/
+/*  pcb[ 1 ].ctx.pc   = ( uint32_t )( entry_P0 );*/
+/*  pcb[ 1 ].ctx.sp   = ( uint32_t )(  &tos_init - 0x00006000 );*/
+/*  pcb[ 1 ].pst      = EXECUTING;*/
+/*  pcb[ 1 ].defp = pcb[ 1 ].prio = 10; // Higher value = lower priority; (best is 0)*/
+
+  memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
+
+  rq_size = 0;
+  readyq_add( 0 );
 
 	// superblock defined at block address 1
   //wipe();
@@ -544,7 +558,7 @@ void kernel_handler_irq( ctx_t* ctx ) {
   return;
 }
 
-void kernel_handler_svc( ctx_t* ctx, uint32_t id, int a1, int a2 ) { 
+void kernel_handler_svc( ctx_t* ctx, uint32_t id ) { 
   switch( id ) {
     case 0x00 : { // yield()
       scheduler( ctx );
@@ -586,6 +600,8 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id, int a1, int a2 ) {
     }
     case 0x04 : { // exec
       exec( ctx, ctx->gpr[ 0 ] );
+      memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
+      //irq_enable();
       break;
     }
     case 0x05 : { // exit
@@ -593,38 +609,38 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id, int a1, int a2 ) {
       break;
     }
     case 0x06 : { // kill
-      kill( a1, a2 );
+      //kill( a1, a2 );
       break;
     }
     case 0x07 : { // raise
-      kill( current->pid, a1 );
-      scheduler( ctx ); // for now - raise immediately invokes scheduler
+      //kill( current->pid, a1 );
+      //scheduler( ctx ); // for now - raise immediately invokes scheduler
       break;
     }
-    case 0x08 : { // mqueue open
-      ctx->gpr[ 0 ] = mq_open( a1 );
-      break;
-    }
-    case 0x09 : { // channel send
-      if (0 <= a1 && a1 < MSGCHAN_LIMIT ) { // within bounds of legal message queue addr.
-        ctx->gpr[ 0 ] = mq_send( a1, (void*)a2 );
-        if (ctx->gpr[ 0 ] == -1) {
-          ctx->gpr[ 1 ] = a1;
-          ctx->gpr[ 2 ] = a2;
-        }
-      } 
-      break;
-    }
-    case 0x0a : { // channel receive
-      if (0 <= a1 && a1 < MSGCHAN_LIMIT ) { // within bounds of legal message queue addr.
-        ctx->gpr[ 0 ] = mq_receive( a1, (void*)a2 );
-        if (ctx->gpr[ 0 ] == -1) {
-          ctx->gpr[ 1 ] = a1;
-          ctx->gpr[ 2 ] = a2;
-        }
-      }
-      break;
-    }
+/*    case 0x08 : { // mqueue open*/
+/*      ctx->gpr[ 0 ] = mq_open( a1 );*/
+/*      break;*/
+/*    }*/
+/*    case 0x09 : { // channel send*/
+/*      if (0 <= a1 && a1 < MSGCHAN_LIMIT ) { // within bounds of legal message queue addr.*/
+/*        ctx->gpr[ 0 ] = mq_send( a1, (void*)a2 );*/
+/*        if (ctx->gpr[ 0 ] == -1) {*/
+/*          ctx->gpr[ 1 ] = a1;*/
+/*          ctx->gpr[ 2 ] = a2;*/
+/*        }*/
+/*      } */
+/*      break;*/
+/*    }*/
+/*    case 0x0a : { // channel receive*/
+/*      if (0 <= a1 && a1 < MSGCHAN_LIMIT ) { // within bounds of legal message queue addr.*/
+/*        ctx->gpr[ 0 ] = mq_receive( a1, (void*)a2 );*/
+/*        if (ctx->gpr[ 0 ] == -1) {*/
+/*          ctx->gpr[ 1 ] = a1;*/
+/*          ctx->gpr[ 2 ] = a2;*/
+/*        }*/
+/*      }*/
+/*      break;*/
+/*    }*/
     case 0x0b: {
       wipe();
       break;

@@ -16,7 +16,6 @@ int is_prime( uint32_t x ) {
 
 void P0() {
   int x = 0;
-  char buf[12];
 
   while( 1 ) {
     // test whether each x for 2^8 < x < 2^24 is prime or not
@@ -26,12 +25,12 @@ void P0() {
 
       // printf( "is_prime( %d ) = %d\n", x, r );   
       write( 0, "is_prime( ", 10 );
-      int2str( x, buf, 10 );
-      write( 0, buf, strlen( buf ) ); 
+        write_int( 0, x );
       write( 0, " ) = ", 5 );
-      int2str( r, buf, 10 );
-      write( 0, buf, strlen( buf ) );
-      write( 0, "\n", 1 );   
+        write_int( 0, r );
+      write( 0, "\n", 1 ); 
+      
+      //yield();  
     }
   }
 
