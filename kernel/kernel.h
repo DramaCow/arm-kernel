@@ -120,7 +120,6 @@ typedef struct {
   // priority
   uint32_t defp; // default priority
   uint32_t prio; // minor priority
-  uint8_t  rndflag; // completed this process round?
 
   // file descriptor table (holds file descriptions)
   ofile_t * fd[ FDT_LIMIT ];

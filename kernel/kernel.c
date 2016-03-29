@@ -16,27 +16,25 @@ int cmp_pcb( const void* p1, const void* p2 ) {
   else if ( (*((pcb_t**)(p1))) != NULL && (*((pcb_t**)(p2))) == NULL ) return -1;
   else if ( (*((pcb_t**)(p1))) == NULL && (*((pcb_t**)(p2))) == NULL ) return  0;
 
-  // Terminated processes go behind live processes
+  // Terminated processes go behind waiting processes
   if      ( (*((pcb_t**)(p1)))->pst == TERMINATED && (*((pcb_t**)(p2)))->pst != TERMINATED ) return  1;
   else if ( (*((pcb_t**)(p1)))->pst != TERMINATED && (*((pcb_t**)(p2)))->pst == TERMINATED ) return -1;
-  else if ( (*((pcb_t**)(p1)))->pst == TERMINATED && (*((pcb_t**)(p2)))->pst == TERMINATED ) return  0;
 
   // Waiting processes go behind live processes
   if      ( (*((pcb_t**)(p1)))->pst == WAITING && (*((pcb_t**)(p2)))->pst != WAITING ) return  1;
   else if ( (*((pcb_t**)(p1)))->pst != WAITING && (*((pcb_t**)(p2)))->pst == WAITING ) return -1;
-  else if ( (*((pcb_t**)(p1)))->pst == WAITING && (*((pcb_t**)(p2)))->pst == WAITING ) return  0;
 
-  // Round complete processes go behind ready processes
-  if      ( (*((pcb_t**)(p1)))->rndflag == 1 && (*((pcb_t**)(p2)))->rndflag == 0 ) return  1;
-  else if ( (*((pcb_t**)(p1)))->rndflag == 0 && (*((pcb_t**)(p2)))->rndflag == 1 ) return -1;
+  // Zero priority processes go behind priority processes
+  if      ( (*((pcb_t**)(p1)))->prio == 0 && (*((pcb_t**)(p2)))->prio  > 0 ) return  1;
+  else if ( (*((pcb_t**)(p1)))->prio  > 0 && (*((pcb_t**)(p2)))->prio == 0 ) return -1;
 
-  // Higher priority goes behind lower priority
-  if      ( (*((pcb_t**)(p1)))->prio > (*((pcb_t**)(p2)))->prio ) return  1;
-  else if ( (*((pcb_t**)(p1)))->prio < (*((pcb_t**)(p2)))->prio ) return -1;
+  // Lower priority goes behind higher priority
+  if      ( (*((pcb_t**)(p1)))->defp < (*((pcb_t**)(p2)))->defp ) return  1;
+  else if ( (*((pcb_t**)(p1)))->defp > (*((pcb_t**)(p2)))->defp ) return -1;
 
-  // Equal priority live processes ordered by memory addr value
-  if      ( p1 > p2 ) return  1;
-  else if ( p1 < p2 ) return -1;
+  // Equal priority live processes ordered by pid
+  if      ( (*((pcb_t**)(p1)))->pid > (*((pcb_t**)(p2)))->pid ) return  1;
+  else if ( (*((pcb_t**)(p1)))->pid < (*((pcb_t**)(p2)))->pid ) return -1;
   
   return 0;
 }
@@ -59,7 +57,6 @@ void rq_rotate() {
 void rq_add( pid_t pid ) {
   if (rq_size < PROCESS_LIMIT) { 
     rq[ rq_size ] = &pcb[ pid ];
-    rq[ rq_size ]->rndflag = 0;
     rq_size++;
   }
   // TODO: error signal
@@ -87,31 +84,23 @@ void scheduler( ctx_t* ctx ) {
   qsort( rq, PROCESS_LIMIT, sizeof(pcb_t*), cmp_pcb );
   //rq_rotate();
 
-  // There exists a live program in ready queue (and there is a point to scheduling : rq_size>1)
-  if (rq[ 0 ] != NULL && rq_size > 1) {
-    // base case, trigger last flag
-    if (rq[ 1 ]->rndflag == 1)
-      rq[ 0 ]->rndflag = 1;
-
-    // reset all round flags (should be in order by this point)
-    if (rq[ 0 ]->rndflag == 1) {
+  // There exists a live program in ready queue
+  if (rq[ 0 ] != NULL) {
+    // reset all priorities (should be in order by this point)
+    if (rq[ 0 ]->prio == 0) {
       for (int i = 0; i < rq_size; i++) {
-        rq[ i ]->rndflag = 0;
+        rq[ i ]->prio = rq[ i ]->defp;
       }
     }
 
     // Current has not changed
     if (current == rq[ 0 ]) {
-      current->prio++; 
+      current->prio--; 
     }
     // Current changed
     else {
-      current->prio = current->defp; // reset priority of entering process
-      current->rndflag = 1;          // trigger round flag
-
       memcpy( &pcb[ current->pid ].ctx, ctx, sizeof( ctx_t ) );
       memcpy( ctx, &rq[ 0 ]->ctx, sizeof( ctx_t ) );
-
       current = rq[ 0 ];
     }
   }
@@ -126,7 +115,7 @@ uint32_t fork( ctx_t* ctx ) {
       memcpy( &pcb[ p ].ctx, ctx, sizeof( ctx_t ));
       pcb[ p ].ctx.gpr[ 0 ]         = 0; // return value of child process
       pcb[ p ].pst                  = EXECUTING;
-      pcb[ p ].defp = pcb[ p ].prio = 10; // Higher value = lower priority; (best is 0)
+      pcb[ p ].defp = pcb[ p ].prio = 100;
 
       rq_add(p);
 
@@ -158,7 +147,7 @@ void exec( ctx_t* ctx, uint32_t program ) {
   current->ctx.pc   = getProgramEntry( program );
   current->ctx.sp   = ( uint32_t )( (uint32_t)(&tos_init) - current->pid * 0x00001000 );
   current->pst      = EXECUTING;
-  current->defp = current->prio = 0;
+  current->defp = current->prio = 2;
 
   memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
 }
@@ -528,7 +517,7 @@ void kernel_handler_rst( ctx_t* ctx ) {
   pcb[ 0 ].ctx.pc   = ( uint32_t )( entry_init );
   pcb[ 0 ].ctx.sp   = ( uint32_t )(  &tos_init );
   pcb[ 0 ].pst      = EXECUTING;
-  pcb[ 0 ].defp = pcb[ 0 ].prio = 10; // Higher value = lower priority; (best is 0)
+  pcb[ 0 ].defp = pcb[ 0 ].prio = 1;
 
   current = &pcb[ 0 ];
   memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
