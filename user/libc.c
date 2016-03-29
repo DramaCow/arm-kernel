@@ -22,76 +22,76 @@ void cexec( uint32_t program ) {
               : "r0"            );
 }
 
-void cexit( void ) { // make this a raise sigkill call!
-  asm volatile( "svc #5 \n"  );
+void cexit() { // TODO: make this a raise sigkill call!
+  craise( SIGKILL );
 }
 
-void ckill( int pid, sig_t sig ) { // TODO: add more signals
-  asm volatile( "mov r2, %0 \n"
-                "mov r3, %1 \n"
+void ckill( int pid, sig_t sig ) { 
+  asm volatile( "mov r0, %0 \n"
+                "mov r1, %1 \n"
                 "svc #6     \n"
               :
-              : "r" (pid), "r" (sig) );
+              : "r" (pid), "r" (sig) 
+              : "r0", "r1"           );
 }
 
 void craise( sig_t sig ) {
-  asm volatile( "mov r2, %0 \n"
+  asm volatile( "mov r0, %0 \n"
                 "svc #7     \n" 
                 :
-                : "r" (sig)     );
+                : "r" (sig)     
+                : "r0"          );
 }
 
 int mqinit( int mqd ) {
   int m;
-  asm volatile( "mov r2, %0 \n"
+
+  asm volatile( "mov r0, %1 \n"
                 "svc #8     \n"
                 "mov %0, r0 \n"
               : "=r" (m)
-              : "r" (mqd)         );
+              : "r" (mqd)   
+              : "r0"            );
+
   return m;
 }
 
-void msgsend( int mqd, void* buf ) {
-  int m = 0;
-  do {
-    asm volatile( "mov r2, %1 \n"
-                  "mov r3, %2 \n"
-                  "svc #9     \n"
-                  "mov %0, r0 \n"
-                : "=r" (m)
-                : "r" (mqd), "r" (buf) );
+void msgsend( int mqd, void* buf, size_t size ) {
+  int m;
 
-    if (m == -1) {
-      yield();
-      asm volatile( "mov  %0, r0 \n"
-                    "mov  %1, r1 \n"
-                    "mov  %2, r2 \n" 
-                  : 
-                  : "r" (m), "r" (mqd), "r" (buf) );  
-    }
-  } while (m == -1);
+  asm volatile( "mov r0, %1 \n"
+                "mov r1, %2 \n"
+                "mov r2, %3 \n"
+                "svc #9     \n"
+                "mov %0, r0 \n"
+              : "=r" (m)
+              : "r" (mqd), "r" (buf), "r" (size) 
+              : "r0", "r1"                       );
+
+  // receiving will wake sender when ready
+  craise( SIGWAIT );
+
   return;
 }
 
-void msgreceive( int mqd, void* buf ) {
-  int m = 0;
-  do {
-    asm volatile( "mov r2, %1 \n"
-                  "mov r3, %2 \n"
-                  "svc #10    \n"
-                  "mov %0, r0 \n"
-                : "=r" (m)
-                : "r" (mqd), "r" (buf) );
+void msgreceive( int mqd, void* buf, size_t size ) {
+  int m;
 
-    if (m == -1) {
-      yield();
-      asm volatile( "mov  %0, r0 \n"
-                    "mov  %1, r1 \n"
-                    "mov  %2, r2 \n" 
-                  : 
-                  : "r" (m), "r" (mqd), "r" (buf) );  
-    }
-  } while (m == -1);
+  asm volatile( "mov r0, %1 \n"
+                "mov r1, %2 \n"
+                "mov r2, %3 \n"
+                "svc #10    \n"
+                "mov %0, r0 \n"
+              : "=r" (m)
+              : "r" (mqd), "r" (buf), "r" (size) 
+              : "r0", "r1"                       );
+
+  // If fails, try again later
+  if (m == -1) {
+    yield();
+    msgreceive( mqd, buf, size );
+  }
+
   return;
 }
 
@@ -180,9 +180,19 @@ char* int2str( int value, char* str, int base ) {
   return str;
 }
 
-void write_int( int fd, int x ) {
-  char buf[12];
+int str2int( char *str, int n, int base ) {
+  int e = 1, value = 0;
+  for (int i = n-1; i >= 0; i--) {
+    if (str[ i ] == '-')
+      return -value;
 
+    value += e * (str[ i ] - '0');
+    e *= base;
+  } 
+  return value;
+}
+
+void write_int( int fd, char *buf, int x ) {
   int2str( x, buf, 10 );
 
   int n;

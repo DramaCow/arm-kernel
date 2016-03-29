@@ -1,31 +1,23 @@
 #include "P3.h"
 
 void P3() {
-  //int data = 0x7FFFFFFF; // 2147483647;
-
 /*  const int FILE = fopen( "/file.txt" );*/
-/*  write_int( 0, FILE ); // success!*/
+/*  char buf[12];*/
+/*  write_int( 0, buf, FILE ); // success!*/
 
-  int m = 15061996;
-  write_int( 0, m );
+  int m = mqinit(100);
 
-  yield();
+  int message = 15061996;
+  msgsend( m, &message, sizeof( int ) );
 
-  write_int( 0, m );
+  msgreceive( m, &message, sizeof( int ) );
+  if (message == 2) write( 0, "success2", 8 );
 
-/*  int m = mqinit(100);*/
+  message = 3;
+  msgsend( m, &message, sizeof( int ) );
 
-/*  int message = 1;*/
-/*  msgsend( m, &message );*/
-
-/*  msgreceive( m, &message );*/
-/*  if (message == 2) write( 0, "success2", 8 );*/
-
-/*  message = 3;*/
-/*  msgsend( m, &message );*/
-
-/*  msgreceive( m, &message );*/
-/*  if (message == 4) write( 0, "success4", 8 );*/
+  msgreceive( m, &message, sizeof( int ) );
+  if (message == 4) write( 0, "success4", 8 );
 
   cexit();
 }

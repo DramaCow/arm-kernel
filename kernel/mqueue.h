@@ -12,7 +12,7 @@ typedef struct mqueue {
   int msg_lspid;  // last send process id
   int msg_lrpid;  // last receive process id
 
-  /*const*/ void* msg_qbuf;   // queue data (only one entry for now) 
+  uint8_t msg_qbuf[64]; // queue data 64 byte limit
 } mqueue;
 
 /*
@@ -39,11 +39,11 @@ extern int mq_unlink(int name);
 /*
  * Receive the oldest message queue
  */
-extern int mq_receive(mqd_t mqd, void* msg_ptr /*, size_t msg_len*/);
+extern int mq_receive(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len);
 
 /* 
  * Add message pointed by msg_ptr to message queue mqd 
  */
-extern int mq_send(mqd_t mqd, void* msg_ptr /*, size_t msg_len*/);
+extern int mq_send(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len);
 
 #endif

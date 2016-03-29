@@ -21,6 +21,15 @@ int cmp_pcb( const void* p1, const void* p2 ) {
   else if ( (*((pcb_t**)(p1)))->pst != TERMINATED && (*((pcb_t**)(p2)))->pst == TERMINATED ) return -1;
   else if ( (*((pcb_t**)(p1)))->pst == TERMINATED && (*((pcb_t**)(p2)))->pst == TERMINATED ) return  0;
 
+  // Waiting processes go behind live processes
+  if      ( (*((pcb_t**)(p1)))->pst == WAITING && (*((pcb_t**)(p2)))->pst != WAITING ) return  1;
+  else if ( (*((pcb_t**)(p1)))->pst != WAITING && (*((pcb_t**)(p2)))->pst == WAITING ) return -1;
+  else if ( (*((pcb_t**)(p1)))->pst == WAITING && (*((pcb_t**)(p2)))->pst == WAITING ) return  0;
+
+  // Round complete processes go behind ready processes
+  if      ( (*((pcb_t**)(p1)))->rndflag == 1 && (*((pcb_t**)(p2)))->rndflag == 0 ) return  1;
+  else if ( (*((pcb_t**)(p1)))->rndflag == 0 && (*((pcb_t**)(p2)))->rndflag == 1 ) return -1;
+
   // Higher priority goes behind lower priority
   if      ( (*((pcb_t**)(p1)))->prio > (*((pcb_t**)(p2)))->prio ) return  1;
   else if ( (*((pcb_t**)(p1)))->prio < (*((pcb_t**)(p2)))->prio ) return -1;
@@ -42,55 +51,70 @@ void rq_rotate() {
   }  
 
   rq[ end ] = head;
+
+  if (rq[ 0 ]->pst != EXECUTING && rq[ 0 ] != NULL)
+    rq_rotate(); // skip past waiting processing
 }
 
-void readyq_add( int p ) {
+void rq_add( pid_t pid ) {
   if (rq_size < PROCESS_LIMIT) { 
-    rq[ rq_size ] = &pcb[ p ];
+    rq[ rq_size ] = &pcb[ pid ];
+    rq[ rq_size ]->rndflag = 0;
     rq_size++;
   }
   // TODO: error signal
 }
 
-void readyq_rmhead() {
-  // Set head to back of queue (for cyclic purposes)
-  rq[ 0 ] = rq[ rq_size-1 ];
+void rq_rm( pid_t pid ) {
+  // fill where process was
+  for (int p = 0; p < rq_size; p++) {
+    if (rq[ p ]->pid == pid) {
 
-  // Remove back of queue and decrease size
-  rq[ rq_size-1 ] = NULL;
-  rq_size--;
+      for(int i = p; i < rq_size-1; i++) {
+        rq[ i ] = rq[ i+1 ];
+      }
+
+      // Remove back of queue and decrease size
+      rq[ rq_size-1 ] = NULL;
+      rq_size--;
+
+    }
+  }
+  // TODO: error finding pid
 } 
 
 void scheduler( ctx_t* ctx ) {
-  //qsort( rq, PROCESS_LIMIT, sizeof(pcb_t*), cmp_pcb );
-  rq_rotate();
+  qsort( rq, PROCESS_LIMIT, sizeof(pcb_t*), cmp_pcb );
+  //rq_rotate();
 
-  // There exists a live program in ready queue
-  if (rq[ 0 ] != NULL) {
+  // There exists a live program in ready queue (and there is a point to scheduling : rq_size>1)
+  if (rq[ 0 ] != NULL && rq_size > 1) {
+    // base case, trigger last flag
+    if (rq[ 1 ]->rndflag == 1)
+      rq[ 0 ]->rndflag = 1;
+
+    // reset all round flags (should be in order by this point)
+    if (rq[ 0 ]->rndflag == 1) {
+      for (int i = 0; i < rq_size; i++) {
+        rq[ i ]->rndflag = 0;
+      }
+    }
+
     // Current has not changed
     if (current == rq[ 0 ]) {
       current->prio++; 
     }
     // Current changed
     else {
-      current->prio = current->defp; // reset priority
+      current->prio = current->defp; // reset priority of entering process
+      current->rndflag = 1;          // trigger round flag
+
       memcpy( &pcb[ current->pid ].ctx, ctx, sizeof( ctx_t ) );
       memcpy( ctx, &rq[ 0 ]->ctx, sizeof( ctx_t ) );
+
       current = rq[ 0 ];
     }
   }
-}
-
-uint32_t getProgramEntry( uint32_t program ) {
-  switch (program) {
-    case 0x00 : return ( uint32_t )( entry_P0 );
-    case 0x01 : return ( uint32_t )( entry_P1 );
-    case 0x02 : return ( uint32_t )( entry_P2 );
-    case 0x03 : return ( uint32_t )( entry_P3 );
-    case 0x04 : return ( uint32_t )( entry_P4 );
-    default   : return ( uint32_t )( entry_init );
-  }
-  return NULL;
 }
 
 uint32_t fork( ctx_t* ctx ) {
@@ -102,14 +126,25 @@ uint32_t fork( ctx_t* ctx ) {
       memcpy( &pcb[ p ].ctx, ctx, sizeof( ctx_t ));
       pcb[ p ].ctx.gpr[ 0 ]         = 0; // return value of child process
       pcb[ p ].pst                  = EXECUTING;
-      pcb[ p ].defp = pcb[ p ].prio = 0; // Higher value = lower priority; (best is 0)
+      pcb[ p ].defp = pcb[ p ].prio = 10; // Higher value = lower priority; (best is 0)
 
-      readyq_add(p);
+      rq_add(p);
 
       return p; // return value as child pid for parent process 
     }
   }
   return -1;    // error: no available memory
+}
+
+uint32_t getProgramEntry( uint32_t program ) {
+  switch (program) {
+    case 0x00 : return ( uint32_t )( entry_P0 );
+    case 0x01 : return ( uint32_t )( entry_P1 );
+    case 0x02 : return ( uint32_t )( entry_P2 );
+    case 0x03 : return ( uint32_t )( entry_P3 );
+    case 0x04 : return ( uint32_t )( entry_P4 );
+  }
+  return NULL;
 }
 
 void exec( ctx_t* ctx, uint32_t program ) {
@@ -123,17 +158,9 @@ void exec( ctx_t* ctx, uint32_t program ) {
   current->ctx.pc   = getProgramEntry( program );
   current->ctx.sp   = ( uint32_t )( (uint32_t)(&tos_init) - current->pid * 0x00001000 );
   current->pst      = EXECUTING;
-  current->defp = current->prio = 9;
+  current->defp = current->prio = 0;
 
-  //memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
-}
-
-void _exit( ctx_t* ctx ) {
-  readyq_rmhead();
-  current->pst = TERMINATED;
-
-  scheduler( ctx );
-  //TIMER0->Timer1IntClr = 0x01; // reset timer
+  memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
 }
 
 void kill( pid_t pid, sig_t sig ) {
@@ -141,6 +168,7 @@ void kill( pid_t pid, sig_t sig ) {
     switch (sig) {
       case SIGKILL: { // enforced immediately
         pcb[ pid ].pst = TERMINATED;
+        rq_rm( pid );
         break; 
       }
       case SIGWAIT: { // enforced immediately
@@ -148,9 +176,8 @@ void kill( pid_t pid, sig_t sig ) {
         break;
       }
       case SIGCONT: { // enforced immediately
-        if (pcb[ pid ].pst == WAITING) {
+        if (pcb[ pid ].pst == WAITING)
           pcb[ pid ].pst = EXECUTING;
-        }
         break;
       }
     }
@@ -166,52 +193,48 @@ void kill( pid_t pid, sig_t sig ) {
 // === MESSAGE QUEUES ===
 // ======================
 
-mqd_t mq_open(int name) {
-  // Check to see if mqueue already open
-  mqd_t j = -1;
-  for (mqd_t i = 0; i < MSGCHAN_LIMIT; i++) { // TODO: replace w/ mqueue table
-    if (mq[i].msg_qname == name) {
+int mq_open(int name) {
+  // check to see if mqueue already open
+  for (mqd_t i = 0; i < MSGCHAN_LIMIT; i++) {
+    if (mq[ i ].msg_qname == name)
+      return i;
+  }
+
+  // open new channel
+  for (mqd_t i = 0; i < MSGCHAN_LIMIT; i++) {
+    if (mq[ i ].msg_qname == 0) {
+      mq[ i ].msg_qname = name;
       return i;
     }
-    if (j < 0 && mq[i].msg_qname <= 0) { // no lowest qname and mq available
-      j = i; // lowest available qname
-    }
   }
 
-  // Create new queue
-  if (j >= 0) {
-    mq[j].msg_qname = name;
-  }
-
-  return j; // descriptor > 0 if succeeded; -1 if failed
+  return -1; // no channels available
 }
 
-int mq_receive(mqd_t mqd, void* msg_ptr) {
-  mq[ mqd ].msg_lrpid = current->pid;  
-  
-  // space on mqueue & last sender wasn't current receiver
-  if (mq[ mqd ].msg_qnum > 0 && mq[ mqd ].msg_lspid != current->pid) { 
-    mq[ mqd ].msg_qnum -= 1;
-    memcpy( msg_ptr, /*&*/mq[ mqd ].msg_qbuf, sizeof( int ) ); // will pass no. bytes as param
-
-    return sizeof(msg_ptr); //???
-  }
-
-  return -1; // return and wait until data is on mqueue
-}
-
-int mq_send(mqd_t mqd, void* msg_ptr) {
+int mq_send(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len) {
   mq[ mqd ].msg_lspid = current->pid;
 
   if (mq[ mqd ].msg_qnum == 0) { // space on mqueue
     mq[ mqd ].msg_qnum++;
-    memcpy( mq[ mqd ].msg_qbuf, msg_ptr, sizeof( int ) ); // will pass no. bytes as param
-    //mq[ mqd ].msg_qbuf = *(int*)msg_ptr;
-
+    memcpy( mq[ mqd ].msg_qbuf, msg_ptr, msg_len );
     return 0;
   }
 
-  return -1; // return and wait until ready to push data again
+  return -1;
+}
+
+int mq_receive(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len) {
+  mq[ mqd ].msg_lrpid = current->pid;  
+  
+  // space on mqueue & last sender wasn't current receiver
+  if (mq[ mqd ].msg_qnum > 0 && mq[ mqd ].msg_lspid != current->pid) { 
+    mq[ mqd ].msg_qnum--;
+    memcpy( msg_ptr, mq[ mqd ].msg_qbuf, msg_len );
+    kill( mq[ mqd ].msg_lspid, SIGCONT ); // wake sender
+    return sizeof(msg_ptr); // just some success value (it doesn't matter so long as it's positive)
+  }
+
+  return -1;
 }
 
 // ==================
@@ -498,34 +521,22 @@ int open( const char *path/*, int oflag, ...*/) {
 // =====================================
 
 void kernel_handler_rst( ctx_t* ctx ) { 
+  memset( &pcb[ 0 ], 0, sizeof( pcb_t ) );
+  pcb[ 0 ].pid      = 0;
+  pcb[ 0 ].prt      = 0;
+  pcb[ 0 ].ctx.cpsr = 0x50; // processor switched into USR mode, w/ IRQ interrupts enabled
+  pcb[ 0 ].ctx.pc   = ( uint32_t )( entry_init );
+  pcb[ 0 ].ctx.sp   = ( uint32_t )(  &tos_init );
+  pcb[ 0 ].pst      = EXECUTING;
+  pcb[ 0 ].defp = pcb[ 0 ].prio = 10; // Higher value = lower priority; (best is 0)
+
   current = &pcb[ 0 ];
-  exec( ctx, -1 );
-
-/*  memset( &pcb[ 0 ], 0, sizeof( pcb_t ) );*/
-/*  pcb[ 0 ].pid      = 0;*/
-/*  pcb[ 0 ].prt      = 0;*/
-/*  pcb[ 0 ].ctx.cpsr = 0x50; // processor switched into USR mode, w/ IRQ interrupts enabled*/
-/*  pcb[ 0 ].ctx.pc   = ( uint32_t )( entry_P0 );*/
-/*  pcb[ 0 ].ctx.sp   = ( uint32_t )(  &tos_init );*/
-/*  pcb[ 0 ].pst      = EXECUTING;*/
-/*  pcb[ 0 ].defp = pcb[ 0 ].prio = 10; // Higher value = lower priority; (best is 0)*/
-
-/*  memset( &pcb[ 1 ], 0, sizeof( pcb_t ) );*/
-/*  pcb[ 1 ].pid      = 1;*/
-/*  pcb[ 1 ].prt      = 0;*/
-/*  pcb[ 1 ].ctx.cpsr = 0x50; // processor switched into USR mode, w/ IRQ interrupts enabled*/
-/*  pcb[ 1 ].ctx.pc   = ( uint32_t )( entry_P0 );*/
-/*  pcb[ 1 ].ctx.sp   = ( uint32_t )(  &tos_init - 0x00006000 );*/
-/*  pcb[ 1 ].pst      = EXECUTING;*/
-/*  pcb[ 1 ].defp = pcb[ 1 ].prio = 10; // Higher value = lower priority; (best is 0)*/
-
   memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
 
   rq_size = 0;
-  readyq_add( 0 );
+  rq_add( 0 );
 
 	// superblock defined at block address 1
-  //wipe();
 	disk_rd( 1, (uint8_t*)(&fs), sizeof( fs_t ) ); // TODO: investigate padding
 
   TIMER0->Timer1Load     = 0x00100000; // select period = 2^20 ticks ~= 1 sec
@@ -562,7 +573,6 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
   switch( id ) {
     case 0x00 : { // yield()
       scheduler( ctx );
-      TIMER0->Timer1IntClr = 0x01; // reset timer
       break;
     }
     case 0x01 : { // write( fd, x, n )
@@ -600,52 +610,38 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     }
     case 0x04 : { // exec
       exec( ctx, ctx->gpr[ 0 ] );
-      memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
-      //irq_enable();
       break;
     }
-    case 0x05 : { // exit
-      _exit( ctx );
+    case 0x05 : {
+      // UNUSED
       break;
     }
     case 0x06 : { // kill
-      //kill( a1, a2 );
+      kill( ctx->gpr[ 0 ], ctx->gpr[ 1 ] );
       break;
     }
     case 0x07 : { // raise
-      //kill( current->pid, a1 );
-      //scheduler( ctx ); // for now - raise immediately invokes scheduler
+      kill( current->pid, ctx->gpr[ 0 ] );
+      scheduler( ctx ); // for now - raise immediately invokes scheduler
       break;
     }
-/*    case 0x08 : { // mqueue open*/
-/*      ctx->gpr[ 0 ] = mq_open( a1 );*/
-/*      break;*/
-/*    }*/
-/*    case 0x09 : { // channel send*/
-/*      if (0 <= a1 && a1 < MSGCHAN_LIMIT ) { // within bounds of legal message queue addr.*/
-/*        ctx->gpr[ 0 ] = mq_send( a1, (void*)a2 );*/
-/*        if (ctx->gpr[ 0 ] == -1) {*/
-/*          ctx->gpr[ 1 ] = a1;*/
-/*          ctx->gpr[ 2 ] = a2;*/
-/*        }*/
-/*      } */
-/*      break;*/
-/*    }*/
-/*    case 0x0a : { // channel receive*/
-/*      if (0 <= a1 && a1 < MSGCHAN_LIMIT ) { // within bounds of legal message queue addr.*/
-/*        ctx->gpr[ 0 ] = mq_receive( a1, (void*)a2 );*/
-/*        if (ctx->gpr[ 0 ] == -1) {*/
-/*          ctx->gpr[ 1 ] = a1;*/
-/*          ctx->gpr[ 2 ] = a2;*/
-/*        }*/
-/*      }*/
-/*      break;*/
-/*    }*/
-    case 0x0b: {
+    case 0x08 : { // mqueue open
+      ctx->gpr[ 0 ] = mq_open( ctx->gpr[ 0 ] );
+      break;
+    }
+    case 0x09 : { // channel send
+      ctx->gpr[ 0 ] = mq_send( ctx->gpr[ 0 ], (uint8_t*)ctx->gpr[ 1 ], (size_t)ctx->gpr[ 2 ] );
+      break;
+    }
+    case 0x0a : { // channel receive
+      ctx->gpr[ 0 ] = mq_receive( ctx->gpr[ 0 ], (uint8_t*)ctx->gpr[ 1 ], (size_t)ctx->gpr[ 2 ] );
+      break;
+    }
+    case 0x0b : { // reformat
       wipe();
       break;
     }
-    case 0x0c: {
+    case 0x0c : { // open file
       char* path = ( char* )( ctx->gpr[ 0 ] );  
       ctx->gpr[ 0 ] = open( path );
       break;

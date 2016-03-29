@@ -5,17 +5,17 @@ void P4() {
 
   int message;
 
-  msgreceive( m, &message );
-  if (message == 1) write( 0, "success1", 8 );
+  msgreceive( m, &message, sizeof( int ) );
+  if (message == 15061996) write( 0, "success1", 8 );
 
   message = 2;
-  msgsend( m, &message );
+  msgsend( m, &message, sizeof( int ) );
 
-  msgreceive( m, &message );
+  msgreceive( m, &message, sizeof( int ) );
   if (message == 3) write( 0, "success3", 8 );
 
   message = 4;
-  msgsend( m, &message );
+  msgsend( m, &message, sizeof( int ) );
 
   cexit();
 }

@@ -39,7 +39,8 @@ void init() {
       }
     }
     else if (strncmp(tok, "kill", 4) == 0) {
-      // kill( stoi( strtok(NULL, " ") ) );
+      // should be 1 digit
+      ckill( str2int( strtok(NULL, " "), 1, 10 ), SIGKILL );
     }
     else if (strncmp(tok, "wipe", 4) == 0) {
       disk_wipe();
