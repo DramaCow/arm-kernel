@@ -13,7 +13,7 @@
 #include "disk.h"
 
 #include "interrupt.h"
-#include "signal.h"
+#include "terms.h"
 #include "mqueue.h"
 
 #include "init.h"
@@ -28,7 +28,7 @@
 // ==================
 
 #define BLOCK_SIZE 512                       // number of bytes in a block
-#define ROOT_DIR 2                           // inode number of root directory
+#define ROOT_DIR 0                           // inode number of root directory
 
 #define FDT_LIMIT 16                         // limit on number of file descriptor table entries (per process)
 #define OFT_LIMIT FDT_LIMIT * PROCESS_LIMIT  // limit on number of open file table entries       (global)
@@ -80,13 +80,13 @@ typedef struct {
 
 typedef struct {
   uint32_t  i_number;
+  uint32_t  i_links; // how many OFT entries link to this inode
   icommon_t i_ic;
 } inode_t; // in-core inode
 
 typedef struct {
   inode_t *o_inptr;
-  // o_flag
-  // I/O head
+  uint32_t o_head; // r/w head position
 } ofile_t; // open file
 
 // ========================================================

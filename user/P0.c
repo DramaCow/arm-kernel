@@ -25,11 +25,11 @@ void P0() {
       int r = is_prime( x ); 
 
       // printf( "is_prime( %d ) = %d\n", x, r );   
-      write( 0, "is_prime( ", 10 );
-        write_int( 0, buf, x );
-      write( 0, " ) = ", 5 );
-        write_int( 0, buf, r );
-      write( 0, "\n", 1 ); 
+      write( STDIO, "is_prime( ", 10 );
+      write_int( STDIO, buf, x );
+      write( STDIO, " ) = ", 5 );
+      write_int( STDIO, buf, r );
+      write( STDIO, "\n", 1 ); 
       
       //yield();  
     }

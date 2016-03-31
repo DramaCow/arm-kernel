@@ -20,13 +20,13 @@ void P2() {
       uint32_t r = weight( x );  
 
       // printf( "weight( %d ) = %d\n", x, r );
-      write( 0, "weight( ", 8 );
+      write( STDIO, "weight( ", 8 );
       int2str( x, buf, 10 );
-      write( 0, buf, strlen( buf ) );
-      write( 0, " ) = ", 5 );
+      write( STDIO, buf, strlen( buf ) );
+      write( STDIO, " ) = ", 5 );
       int2str( r, buf, 10 );
-      write( 0, buf, strlen( buf ) );
-      write( 0, "\n", 1 );
+      write( STDIO, buf, strlen( buf ) );
+      write( STDIO, "\n", 1 );
     }
   }
 

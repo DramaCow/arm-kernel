@@ -1,21 +1,29 @@
 #include "P4.h"
 
 void P4() {
-  int m = mqinit(100);
+  const int FILE = fopen( "/file.txt" );
 
-  int message;
+  char message[ 64 ];
+  read( FILE, message, 13 );  
+  write( STDIO, message, 13 );
 
-  msgreceive( m, &message, sizeof( int ) );
-  if (message == 15061996) write( 0, "success1", 8 );
+  fclose( FILE );
 
-  message = 2;
-  msgsend( m, &message, sizeof( int ) );
+/*  int m = mqinit(100);*/
 
-  msgreceive( m, &message, sizeof( int ) );
-  if (message == 3) write( 0, "success3", 8 );
+/*  int message;*/
 
-  message = 4;
-  msgsend( m, &message, sizeof( int ) );
+/*  msgreceive( m, &message, sizeof( int ) );*/
+/*  if (message == 15061996) write( STDIO, "success1", 8 );*/
+
+/*  message = 2;*/
+/*  msgsend( m, &message, sizeof( int ) );*/
+
+/*  msgreceive( m, &message, sizeof( int ) );*/
+/*  if (message == 3) write( STDIO, "success3", 8 );*/
+
+/*  message = 4;*/
+/*  msgsend( m, &message, sizeof( int ) );*/
 
   cexit();
 }

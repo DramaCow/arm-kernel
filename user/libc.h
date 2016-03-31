@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "signal.h"
+#include "terms.h"
 
 // cooperatively yield control of processor, i.e., invoke the scheduler
 void yield();
@@ -35,6 +35,7 @@ int read( int fd, void* x, size_t n );
 // filesystem functions
 void disk_wipe();
 int fopen( const char *path );
+int fclose( const int fd );
 
 // =========================
 // === HELPFUL FUNCTIONS ===

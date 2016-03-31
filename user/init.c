@@ -18,12 +18,13 @@ void init() {
 /*  if (f2 == 0) cexec(0);*/
 
   char x[32];
+  char* tok;
 
   while( 1 ) {
-    read( 0, x, 16);
-    char* tok = strtok(x, " ");
+    read( STDIO, x, 16);
+    tok = strtok(x, " ");
 
-    if (strncmp(tok, "run", 3) == 0) {
+    if      (strncmp(tok, "run", 3) == 0) {
       int p = program_code( strtok(NULL, " ") );   
    
       if (p != -1) { // if successfully found program        
@@ -33,7 +34,7 @@ void init() {
           cexec( p );
         }
         else if (f == -1) {
-          write( 0, "\nmemory fault\n", 14 );
+          write( STDIO, "\nmemory fault\n", 14 );
           break; // May not be necessary?? - memory could become free between fork calls
         }
       }
@@ -46,9 +47,30 @@ void init() {
       disk_wipe();
     }
     else if (strncmp(tok, "quit", 4) == 0) {
-      cexit();
-      return;
+      cexit(); return;
     }
+
+/*    else if (strncmp(tok, "cd", 2) == 0) {*/
+
+/*    }*/
+/*    else if (strncmp(tok, "pwd", 3) == 0) {*/
+
+/*    }*/
+/*    else if (strncmp(tok, "ls", 2) == 0) {*/
+
+/*    }*/
+/*    else if (strncmp(tok, "mkdir", 5) == 0) {*/
+
+/*    }*/
+/*    else if (strncmp(tok, "mv", 2) == 0) {*/
+
+/*    }*/
+/*    else if (strncmp(tok, "cp", 2) == 0) {*/
+
+/*    }*/
+/*    else if (strncmp(tok, "rm", 2) == 0) {*/
+
+/*    }*/
 
     yield(); // gets rid of reading delay
   }

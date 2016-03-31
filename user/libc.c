@@ -143,6 +143,19 @@ int fopen( const char *path ) {
   return fd;
 }
 
+int fclose( const int fd ) {
+  int r;
+
+  asm volatile( "mov r0, %1 \n"
+                "svc #13    \n"
+                "mov %0, r0 \n" 
+              : "=r" (r) 
+              : "r" (fd) 
+              : "r0"            );
+
+  return r; 
+}
+
 // =========================
 // === HELPFUL FUNCTIONS ===
 // =========================

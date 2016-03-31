@@ -23,16 +23,16 @@ void P1() {
         uint32_t r = gcd( x, y );  
 
         // printf( "gcd( %d, %d ) = %d\n", x, y, r );
-        write( 0, "gcd( ", 5 );
+        write( STDIO, "gcd( ", 5 );
         int2str( x, buf, 10 );
-        write( 0, buf, strlen( buf ) );
-        write( 0, ", ", 2 );
+        write( STDIO, buf, strlen( buf ) );
+        write( STDIO, ", ", 2 );
         int2str( y, buf, 10 );
-        write( 0, buf, strlen( buf ) );
-        write( 0, " ) = ", 5 );
+        write( STDIO, buf, strlen( buf ) );
+        write( STDIO, " ) = ", 5 );
         int2str( r, buf, 10 );
-        write( 0, buf, strlen( buf ) );
-        write( 0, "\n", 1 );
+        write( STDIO, buf, strlen( buf ) );
+        write( STDIO, "\n", 1 );
       }
     }
   }
