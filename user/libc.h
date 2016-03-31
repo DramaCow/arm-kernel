@@ -37,6 +37,15 @@ void disk_wipe();
 int fopen( const char *path );
 int fclose( const int fd );
 
+// ===========================
+// === DIRECTORY FUNCTIONS ===
+// ===========================
+
+void pwd();
+void ls();
+int mkdir( const char *name );
+int cd( const char *path );
+
 // =========================
 // === HELPFUL FUNCTIONS ===
 // =========================

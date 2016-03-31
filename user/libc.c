@@ -156,6 +156,44 @@ int fclose( const int fd ) {
   return r; 
 }
 
+// ===========================
+// === DIRECTORY FUNCTIONS ===
+// ===========================
+
+void pwd() {
+  asm volatile( "svc #14 \n" );
+}
+
+void ls() {
+  asm volatile( "svc #15 \n" );
+}
+
+int mkdir( const char *name ) {
+  int r;
+
+  asm volatile( "mov r0, %1 \n"
+                "svc #16    \n" 
+                "mov %0, r0 \n"
+              : "=r" (r) 
+              : "r" (name)
+              : "r0"            );
+
+  return r;
+}
+
+int cd( const char *path ) {
+  int r;
+
+  asm volatile( "mov r0, %1 \n"
+                "svc #17    \n" 
+                "mov %0, r0 \n"
+              : "=r" (r) 
+              : "r" (path)
+              : "r0"            );
+
+  return r;
+}
+
 // =========================
 // === HELPFUL FUNCTIONS ===
 // =========================

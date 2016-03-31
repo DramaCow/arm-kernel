@@ -21,6 +21,7 @@ void init() {
   char* tok;
 
   while( 1 ) {
+    write( STDIO, "$ ", 2 );
     read( STDIO, x, 16);
     tok = strtok(x, " ");
 
@@ -50,27 +51,27 @@ void init() {
       cexit(); return;
     }
 
-/*    else if (strncmp(tok, "cd", 2) == 0) {*/
+    else if (strncmp(tok, "pwd", 3) == 0) {
+      pwd();
+    }
+    else if (strncmp(tok, "ls", 2) == 0) {
+      ls();
+    }
+    else if (strncmp(tok, "mkdir", 5) == 0) {
+      mkdir( strtok( NULL, " \n\r" ) );
+    }
+    else if (strncmp(tok, "cd", 2) == 0) {
+      cd( strtok( NULL, " \n\r" ) );
+    }
+    else if (strncmp(tok, "rm", 2) == 0) {
 
-/*    }*/
-/*    else if (strncmp(tok, "pwd", 3) == 0) {*/
+    }
+    else if (strncmp(tok, "mv", 2) == 0) {
 
-/*    }*/
-/*    else if (strncmp(tok, "ls", 2) == 0) {*/
+    }
+    else if (strncmp(tok, "cp", 2) == 0) {
 
-/*    }*/
-/*    else if (strncmp(tok, "mkdir", 5) == 0) {*/
-
-/*    }*/
-/*    else if (strncmp(tok, "mv", 2) == 0) {*/
-
-/*    }*/
-/*    else if (strncmp(tok, "cp", 2) == 0) {*/
-
-/*    }*/
-/*    else if (strncmp(tok, "rm", 2) == 0) {*/
-
-/*    }*/
+    }
 
     yield(); // gets rid of reading delay
   }

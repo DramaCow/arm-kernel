@@ -10,6 +10,10 @@ inode_t ai[ AIT_LIMIT ]; uint32_t ai_size; // available inodes table
 
 fs_t fs; // filesystem metadata
 
+uint32_t cwd; // current working directory inode
+char cwdn[ 256 ]; // string name
+uint16_t cwdnlen;
+
 int cmp_pcb( const void* p1, const void* p2 ) {
   // Empty entries go at back of list
   if      ( (*((pcb_t**)(p1))) == NULL && (*((pcb_t**)(p2))) != NULL ) return  1;
@@ -230,6 +234,40 @@ int mq_receive(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len) {
 // === FILESYSTEM ===
 // ==================
 
+daddr32_t balloc() { // block allocation
+	if (fs.fs_fdbhead > 0) {
+		fs.fs_fdbhead--;
+    disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
+		return fs.fs_fdb[ fs.fs_fdbhead+1 ];
+	}
+	
+	// block addr 1 is addr of superblock - indicates no space remaining
+	if (fs.fs_fdb[ fs.fs_fdbhead ] != 1) {
+		daddr32_t addr = fs.fs_fdb[ fs.fs_fdbhead ];
+		disk_rd( addr, (uint8_t*)fs.fs_fdb, 64 * sizeof( daddr32_t ) );
+    disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
+		return addr;
+	}
+
+	return -1; // no more available blocks
+}
+
+int bfree( daddr32_t a ) { // block free
+	if (fs.fs_fdbhead < 63) {
+		fs.fs_fdb[ fs.fs_fdbhead ] = a;
+		fs.fs_fdbhead++;
+    disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
+		return 0; // success
+	}
+
+	disk_wr( a, (uint8_t*)fs.fs_fdb, 64 * sizeof( daddr32_t ) );
+	fs.fs_fdb[ 0 ] = a;
+	fs.fs_fdbhead  = 0;
+  disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
+
+	return 1; // sucess
+}
+
 void wipe() {
   // superblock
   fs.fs_sblkno  = 1;
@@ -265,47 +303,27 @@ void wipe() {
   for (int i = 0; i < 64; i++) {
     disk_rd( i + fs.fs_iblkno, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
     for (int j = 0; j < 8; j++) {
-      ic[ j ].ic_mode = i == 0 && j == ROOT_DIR ? IFDIR : IFZERO;
-      ic[ j ].ic_size = 0;
+      if (i == 0 && j == ROOT_DIR) {
+        ic[ j ].ic_mode = IFDIR;
+        ic[ j ].ic_size = 32;
+        ic[ j ].ic_db[ 0 ] = balloc(); // note: this updates the disk
+
+        dir_t dir[ 16 ];
+        dir[ 0 ].d_ino = ROOT_DIR;
+        dir[ 0 ].d_namlen = 1;
+        dir[ 0 ].d_name[ 0 ] = '.';
+
+        disk_wr( ic[ j ].ic_db[ 0 ], (uint8_t *)dir, 16 * sizeof( dir_t ) );        
+      }
+      else {
+        ic[ j ].ic_mode = IFZERO;
+        ic[ j ].ic_size = 0;
+      }
     }
-    disk_wr( i + fs.fs_iblkno, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
+    disk_wr( i + fs.fs_iblkno, (uint8_t *)ic, 8 * sizeof( icommon_t ) );
   }  
 
   return;
-}
-
-daddr32_t balloc() { // block allocation
-	if (fs.fs_fdbhead > 0) {
-		fs.fs_fdbhead--;
-    disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
-		return fs.fs_fdb[ fs.fs_fdbhead+1 ];
-	}
-	
-	// block addr 1 is addr of superblock - indicates no space remaining
-	if (fs.fs_fdb[ fs.fs_fdbhead ] != 1) {
-		daddr32_t addr = fs.fs_fdb[ fs.fs_fdbhead ];
-		disk_rd( addr, (uint8_t*)fs.fs_fdb, 64 * sizeof( daddr32_t ) );
-    disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
-		return addr;
-	}
-
-	return -1; // no more available blocks
-}
-
-int bfree( daddr32_t a ) { // block free
-	if (fs.fs_fdbhead < 63) {
-		fs.fs_fdb[ fs.fs_fdbhead ] = a;
-		fs.fs_fdbhead++;
-    disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
-		return 0; // success
-	}
-
-	disk_wr( a, (uint8_t*)fs.fs_fdb, 64 * sizeof( daddr32_t ) );
-	fs.fs_fdb[ 0 ] = a;
-	fs.fs_fdbhead  = 0;
-  disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
-
-	return 1; // sucess
 }
 
 inode_t* readInode( inode_t *in, int ino ) {
@@ -365,15 +383,16 @@ void addInodeToDirectory( inode_t* par, uint32_t ino, const char *name ) {
   // TODO: add extra blocks if necessary
   if (r == 0) { // need to allocate a new block
     par->i_ic.ic_db[ q ] = balloc();
-    writeInode( par ); // update inode status on disk
   }
+
+  writeInode( par ); // update inode status on disk
 
 	dir_t dir[ 16 ];	
 	disk_rd( par->i_ic.ic_db[ q ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
 
 	//dir[ r ] = (dir_t){ ino, strlen( name ), name };
   dir[ r ].d_ino    = ino;
-  dir[ r ].d_namlen = strlen( name );
+  dir[ r ].d_namlen = strlen( name ); // TODO: pass in string length (it's safer that way)
   strncpy( dir[ r ].d_name, name, strlen( name ) ); 
 	disk_wr( par->i_ic.ic_db[ q ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
 }
@@ -624,6 +643,10 @@ void kernel_handler_rst( ctx_t* ctx ) {
 	// superblock defined at block address 1
 	disk_rd( 1, (uint8_t*)(&fs), sizeof( fs_t ) ); // TODO: investigate padding
 
+  // set up default working directory
+  cwd       = ROOT_DIR;
+  cwdnlen   = 0;
+
   TIMER0->Timer1Load     = 0x00100000; // select period = 2^20 ticks ~= 1 sec
   TIMER0->Timer1Ctrl     = 0x00000002; // select 32-bit   timer
   TIMER0->Timer1Ctrl    |= 0x00000040; // select periodic timer
@@ -743,6 +766,126 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     }
     case 0x0d : { // close file
       ctx->gpr[ 0 ] = close( ctx->gpr[ 0 ] );
+      break;
+    }
+    case 0x0e : { // pwd
+      PL011_putc( UART0, '/' );
+      for( int i = 0; i < cwdnlen; i++ )
+        PL011_putc( UART0, cwdn[ i ] );
+      PL011_putc( UART0, '\n' );
+      break;
+    }
+    case 0x0f : { // ls
+      inode_t inode;
+      readInode( &inode, cwd );
+      
+      const int dirs = inode.i_ic.ic_size / 32;
+      const int blks = ((dirs-1) / 16) + 1;	// number of blocks
+	    const int r		 = dirs % 16;			      // offset in last block
+	
+	    dir_t dir[ 16 ];
+
+	    for (int i = 0; i < blks-1; i++) {
+		    disk_rd( inode.i_ic.ic_db[ i ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
+		    for (int j = 0; j < 16; j++) {
+			    for( int k = 0; k < dir[ j ].d_namlen; k++ )
+            PL011_putc( UART0, dir[ j ].d_name[ k ] );
+          PL011_putc( UART0, '\n' );
+		    }
+	    }
+
+	    disk_rd( inode.i_ic.ic_db[ blks-1 ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
+	    for (int j = 0; j < r; j++) {
+		    for( int k = 0; k < dir[ j ].d_namlen; k++ )
+          PL011_putc( UART0, dir[ j ].d_name[ k ] );
+        PL011_putc( UART0, '\n' );
+	    }
+
+      // PL011_putc( UART0, '\n' );
+
+      break;
+    }
+    case 0x10 : { // mkdir
+      inode_t child;
+      if ( getFreeInode( &child ) == NULL ) {
+        ctx->gpr[ 0 ] = -1; // failed        
+        break;
+      }
+
+      inode_t parent;
+      readInode( &parent, cwd );
+
+      /* TODO:
+       *   validate name: check parent doesn't already contain directory entry of same name.
+       */
+
+      child.i_ic.ic_mode = IFDIR;
+      child.i_ic.ic_size = 64;
+      child.i_ic.ic_db[ 0 ] = balloc(); // note: this updates the disk
+
+      dir_t dir[ 16 ];
+
+      dir[ 0 ].d_ino = child.i_number;
+      dir[ 0 ].d_namlen = 1;
+      dir[ 0 ].d_name[ 0 ] = '.';
+
+      dir[ 1 ].d_ino = parent.i_number; // aka cwd
+      dir[ 1 ].d_namlen = 2;
+      dir[ 1 ].d_name[ 0 ] = '.'; 
+      dir[ 1 ].d_name[ 1 ] = '.';
+
+      disk_wr( child.i_ic.ic_db[ 0 ], (uint8_t *)dir, 16 * sizeof( dir_t ) );
+      writeInode( &child );
+      addInodeToDirectory( &parent, child.i_number, (char *)ctx->gpr[ 0 ] );  
+
+      ctx->gpr[ 0 ] = 0; // success
+
+      break;
+    }
+    case 0x11 : { // cd
+      inode_t  inode;
+	    int 		 ino = cwd, n;
+	    char 	  *tok;
+
+      char wd[ 256 ]; strncpy( wd, cwdn, cwdnlen );
+      char wdlen = cwdnlen;
+
+	    for (tok = strtok( (char*)ctx->gpr[ 0 ], "/" ); 
+			     tok != NULL && ino != -1; 
+			     tok = strtok( NULL, "/" ) ) 
+      {
+        if (strncmp(tok, "..", 2) == 0) {
+          while (wdlen > 0 && wd[wdlen-1] != '/')
+            wdlen--;
+          wd[ wdlen ] = '\0';
+        }
+        else if (strncmp(tok, ".", 1) == 0) { // must come after double dots!
+          continue; // skip this iteration
+        }
+        else {
+          if (wdlen > 0)
+            wd[ wdlen++ ] = '/';
+          n = strlen( tok );
+          strncat( wd, tok, n );
+          wdlen += n;
+        }
+
+		    readInode( &inode, ino );
+		    ino  = name_to_ino( tok, &inode );
+	    }
+
+      if (ino == -1) {
+        ctx->gpr[ 0 ] = -1; // failure
+        break;
+      }
+
+      cwd = ino;
+      strncpy( cwdn, wd, wdlen );
+      cwdnlen = wdlen;
+
+      ctx->gpr[ 0 ] = 0; // success
+
+      break;
     }
     default   : { // unknown
       break;
