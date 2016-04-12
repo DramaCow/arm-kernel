@@ -456,12 +456,9 @@ int name_to_ino( const char *name, const inode_t *in ) {
 	return -1; // does not exist in directory
 }
 
-int path_to_ino( const char *path ) {
-  icommon_t itest[ 8 ];
-  disk_rd( 2, (uint8_t*)itest, 8 * sizeof( icommon_t ) );
-
+int path_to_ino( const char *path, const int dir ) {
 	inode_t  inode;
-	int 		 ino0,  ino = ROOT_DIR;
+	int 		 ino0,  ino = dir;
 	char 	  *tok0, *tok;
 
 	for (tok0 = tok = strtok( (char*)path, "/" ); 
@@ -505,7 +502,7 @@ int path_to_ino( const char *path ) {
 // === DIRECTORIES FUNCTIONS ===
 
 void addInodeToDirectory( inode_t* par, uint32_t ino, const char *name ) {
-  const int r	= par->i_ic.ic_size % (BLOCK_SIZE / sizeof( dir_t )); // offset in block
+  const int r	= (par->i_ic.ic_size / 32) % 16; // offset in block
   if (r == 0) {
     allocateDataBlocks( par, 1 );
   }
@@ -518,6 +515,7 @@ void addInodeToDirectory( inode_t* par, uint32_t ino, const char *name ) {
   strncpy( dir[ r ].d_name, name, strlen( name ) ); 
 	disk_wr( addr, (uint8_t*)dir, BLOCK_SIZE );
 
+  // WARNING: this may need to go above getDataBlock?
   par->i_ic.ic_size += 32; // add new directory
   writeInode( par );       // update inode status on disk
 }
@@ -563,10 +561,10 @@ inode_t * getAIT( int ino ) {
 // === POSIX FUNCTIONS ===
 
 int open( const char *path/*, int oflag, ...*/) {
-  int fd = getFD();                 if (fd == -1)      return -1;
-	int ino = path_to_ino( path );    if (ino < 0)       return -1;
-  inode_t *inode = getAIT( ino );   if (inode == NULL) return -1; 
-  ofile_t *ofile = getOFT();        if (ofile == NULL) return -1;
+  int fd = getFD();                         if (fd == -1)      return -1;
+	int ino = path_to_ino( path, ROOT_DIR );  if (ino < 0)       return -1;
+  inode_t *inode = getAIT( ino );           if (inode == NULL) return -1; 
+  ofile_t *ofile = getOFT();                if (ofile == NULL) return -1;
 
   // increment number of linked OFT entries to the inode
   inode->i_links++;	
@@ -903,10 +901,9 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
 
       dir[ 1 ].d_ino = parent.i_number; // aka cwd
       dir[ 1 ].d_namlen = 2;
-      dir[ 1 ].d_name[ 0 ] = '.'; 
-      dir[ 1 ].d_name[ 1 ] = '.';
+      dir[ 1 ].d_name[ 0 ] = '.'; dir[ 1 ].d_name[ 1 ] = '.';
 
-      disk_wr( child.i_ic.ic_db[ 0 ], (uint8_t *)dir, 16 * sizeof( dir_t ) );
+      disk_wr( child.i_ic.ic_db[ 0 ], (uint8_t *)dir, BLOCK_SIZE );
       writeInode( &child );
       addInodeToDirectory( &parent, child.i_number, (char *)ctx->gpr[ 0 ] );  
 
@@ -916,32 +913,13 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     }
     case 0x11 : { // cd
       inode_t  inode;
-	    int 		 ino = cwd, n;
+	    int 		 ino = cwd;
 	    char 	  *tok;
 
-      char wd[ 256 ]; strncpy( wd, cwdn, cwdnlen );
-      char wdlen = cwdnlen;
-
-	    for (tok = strtok( (char*)ctx->gpr[ 0 ], "/" ); 
+      for (tok = strtok( (char*)ctx->gpr[ 0 ], "/" ); 
 			     tok != NULL && ino != -1; 
 			     tok = strtok( NULL, "/" ) ) 
       {
-        if (strncmp(tok, "..", 2) == 0) {
-          while (wdlen > 0 && wd[wdlen-1] != '/')
-            wdlen--;
-          wd[ wdlen ] = '\0';
-        }
-        else if (strncmp(tok, ".", 1) == 0) { // must come after double dots!
-          continue; // skip this iteration
-        }
-        else {
-          if (wdlen > 0)
-            wd[ wdlen++ ] = '/';
-          n = strlen( tok );
-          strncat( wd, tok, n );
-          wdlen += n;
-        }
-
 		    readInode( &inode, ino );
 		    ino  = name_to_ino( tok, &inode );
 	    }
@@ -952,14 +930,18 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       }
 
       cwd = ino;
-      strncpy( cwdn, wd, wdlen );
-      cwdnlen = wdlen;
+
+      // TODO: update cwdn
 
       ctx->gpr[ 0 ] = 0; // success
 
       break;
     }
     case 0x12 : { // rm
+      inode_t inode;
+      readInode( &inode, cwd );
+	    int ino = name_to_ino( (char*)ctx->gpr[ 0 ], &inode );
+
       break;
     }
     case 0x13 : { // mv

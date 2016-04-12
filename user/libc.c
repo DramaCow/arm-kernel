@@ -210,15 +210,44 @@ int cd( const char *path ) {
 }
 
 int rm( const char *name ) {
-  return 0;
+  int r;
+
+  asm volatile( "mov r0, %1 \n"
+                "svc #18    \n" 
+                "mov %0, r0 \n"
+              : "=r" (r) 
+              : "r" (name)
+              : "r0"            );
+
+  return r;
 }
 
 int mv( const char *src, const char *dest ) {
-  return 0;
+  int r;
+
+  asm volatile( "mov r0, %1 \n"
+                "mov r1, %2 \n"
+                "svc #19    \n" 
+                "mov %0, r0 \n"
+              : "=r" (r) 
+              : "r" (src), "r" (dest)
+              : "r0"                  );
+
+  return r;
 }
 
 int cp( const char *src, const char *dest ) {
-  return 0;
+  int r;
+
+  asm volatile( "mov r0, %1 \n"
+                "mov r1, %2 \n"
+                "svc #20    \n" 
+                "mov %0, r0 \n"
+              : "=r" (r) 
+              : "r" (src), "r" (dest)
+              : "r0"                  );
+
+  return r;
 }
 
 // =========================
