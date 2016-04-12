@@ -3,9 +3,9 @@
 void P4() {
   const int FILE = fopen( "/file.txt" );
 
-  char message[ 64 ];
-  read( FILE, message, 13 );  
-  write( STDIO, message, 13 );
+  char text[ 1811 ]; text[ 1810 ] = '\0';
+  read( FILE, text, 1810 );  
+  write( STDIO, text, 1810 );
 
   fclose( FILE );
 

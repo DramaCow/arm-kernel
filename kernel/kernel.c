@@ -234,6 +234,8 @@ int mq_receive(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len) {
 // === FILESYSTEM ===
 // ==================
 
+// === BLOCK ALLOCATION FUNCTIONS ===
+
 daddr32_t balloc() { // block allocation
 	if (fs.fs_fdbhead > 0) {
 		fs.fs_fdbhead--;
@@ -267,6 +269,8 @@ int bfree( daddr32_t a ) { // block free
 
 	return 1; // sucess
 }
+
+// === SUPERBLOCK FUNCTIONS ===
 
 void wipe() {
   // superblock
@@ -326,7 +330,58 @@ void wipe() {
   return;
 }
 
-inode_t* readInode( inode_t *in, int ino ) {
+// === DATA BLOCK FUNCTIONS ===
+
+int allocateDataBlocks( inode_t *inode, uint32_t n ) {
+  const int b = inode->i_ic.ic_size / BLOCK_SIZE;
+
+  for (int i = b; i < b + n; i++) { 
+    if (b < 10) {
+      inode->i_ic.ic_db[ i ] = balloc();
+    }
+  }
+
+  return 0;
+}
+
+int getDataBlock( uint8_t *block, const inode_t *inode, uint32_t byte ) { 
+  int blk = byte / BLOCK_SIZE;
+  int addr = -1;
+
+  // Direct block
+  if (blk < 10) {
+    disk_rd( addr = inode->i_ic.ic_db[ blk ], block, BLOCK_SIZE );
+  }
+  // Indirect blocks
+  else {
+    const int ls = BLOCK_SIZE/4;
+
+    if      (blk <= ls + 10) {
+      blk -= 10; 
+      disk_rd( inode->i_ic.ic_ib[ 0 ], block, BLOCK_SIZE );
+      disk_rd( addr = ((uint32_t*)block)[ blk ], block, BLOCK_SIZE );
+    }
+    else if (blk <= ls*ls + ls + 10) {
+      blk -= ls + 10;
+      disk_rd( inode->i_ic.ic_ib[ 1 ], block, BLOCK_SIZE );
+      disk_rd( ((uint32_t*)block)[ blk/ls ], block, BLOCK_SIZE );
+      disk_rd( addr = ((uint32_t*)block)[ blk%ls ], block, BLOCK_SIZE );
+    }
+    else if (blk <= ls*ls*ls + ls*ls + ls + 10) {
+      blk -= ls*ls + ls + 10;
+      disk_rd( inode->i_ic.ic_ib[ 2 ], block, BLOCK_SIZE );
+      disk_rd( ((uint32_t*)block)[ blk/(ls*ls) ], block, BLOCK_SIZE );
+      disk_rd( ((uint32_t*)block)[ (blk%(ls*ls))/ls ], block, BLOCK_SIZE );
+      disk_rd( addr = ((uint32_t*)block)[ blk%ls ], block, BLOCK_SIZE );
+    }
+  } 
+
+  return addr;
+}
+
+// === INODE FUNCTIONS ===
+
+inode_t *readInode( inode_t *in, int ino ) {
 	// TODO: validation in case ino is invalid
 
 	int q = ino / 8;
@@ -341,7 +396,7 @@ inode_t* readInode( inode_t *in, int ino ) {
 	return in;
 }
 
-inode_t * writeInode( inode_t *inode ) {
+inode_t *writeInode( inode_t *inode ) {
   const int q = inode->i_number / 8;
 	const int r = inode->i_number % 8;
 	
@@ -373,30 +428,6 @@ inode_t * getFreeInode( inode_t *in ) {
 	return NULL;
 }
 
-void addInodeToDirectory( inode_t* par, uint32_t ino, const char *name ) {
-	const int d     = par->i_ic.ic_size / 32;  // which directory
-	const int q     = d / 16;				     			 // which block 
-	const int r		  = d % 16;			       			 // offset in block
-
-  par->i_ic.ic_size += 32; // add new directory
-
-  // TODO: add extra blocks if necessary
-  if (r == 0) { // need to allocate a new block
-    par->i_ic.ic_db[ q ] = balloc();
-  }
-
-  writeInode( par ); // update inode status on disk
-
-	dir_t dir[ 16 ];	
-	disk_rd( par->i_ic.ic_db[ q ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
-
-	//dir[ r ] = (dir_t){ ino, strlen( name ), name };
-  dir[ r ].d_ino    = ino;
-  dir[ r ].d_namlen = strlen( name ); // TODO: pass in string length (it's safer that way)
-  strncpy( dir[ r ].d_name, name, strlen( name ) ); 
-	disk_wr( par->i_ic.ic_db[ q ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
-}
-
 int name_to_ino( const char *name, const inode_t *in ) {
 	const int bytes = in->i_ic.ic_size; // number of bytes
 	const int dirs  = bytes / 32;       // number of directories
@@ -408,23 +439,19 @@ int name_to_ino( const char *name, const inode_t *in ) {
 	  dir_t dir[ 16 ];
 
 	  for (int i = 0; i < blks-1; i++) {
-		  disk_rd( in->i_ic.ic_db[ i ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
+      getDataBlock( (uint8_t*)dir, in, BLOCK_SIZE * i );
 		  for (int j = 0; j < 16; j++) {
 			  if (strncmp(name, dir[j].d_name, strlen(name)) == 0)
 				  return dir[j].d_ino;
 		  }
 	  }
 
-	  disk_rd( in->i_ic.ic_db[ blks-1 ], (uint8_t*)dir, 16 * sizeof( dir_t ) );
+    getDataBlock( (uint8_t*)dir, in, BLOCK_SIZE * (blks-1) );
 	  for (int j = 0; j < r; j++) {
 		  if (strncmp(name, dir[j].d_name, strlen(name)) == 0)
 			  return dir[j].d_ino;
 	  }
   }
-
-	/*
-	 * TODO: deal with indirect blocks as well
-	 */
 
 	return -1; // does not exist in directory
 }
@@ -467,13 +494,35 @@ int path_to_ino( const char *path ) {
 		inode_t parent;
 		readInode( &parent, ino0 );
 		addInodeToDirectory( &parent, inode.i_number, tok0 ); // TODO: parent will get written to 
-                                                          //       - thus assumes parent is not in AIT (since is a dir.)
+                                                          // - thus assumes parent is not in AIT (since is a dir.)
 
 		return inode.i_number;
 	}
 
   return ino; 
 }
+
+// === DIRECTORIES FUNCTIONS ===
+
+void addInodeToDirectory( inode_t* par, uint32_t ino, const char *name ) {
+  const int r	= par->i_ic.ic_size % (BLOCK_SIZE / sizeof( dir_t )); // offset in block
+  if (r == 0) {
+    allocateDataBlocks( par, 1 );
+  }
+
+  dir_t dir[ 16 ];	
+  daddr32_t addr = getDataBlock( (uint8_t*)dir, par, par->i_ic.ic_size );
+
+  dir[ r ].d_ino    = ino;
+  dir[ r ].d_namlen = strlen( name ); // TODO: pass in string length (it's safer that way)
+  strncpy( dir[ r ].d_name, name, strlen( name ) ); 
+	disk_wr( addr, (uint8_t*)dir, BLOCK_SIZE );
+
+  par->i_ic.ic_size += 32; // add new directory
+  writeInode( par );       // update inode status on disk
+}
+
+// === TABLE FUNCTIONS ===
 
 int getFD() {
   // find valid file descriptor table entry
@@ -510,6 +559,8 @@ inode_t * getAIT( int ino ) {
 
 	return NULL; // table full
 }
+
+// === POSIX FUNCTIONS ===
 
 int open( const char *path/*, int oflag, ...*/) {
   int fd = getFD();                 if (fd == -1)      return -1;
@@ -562,7 +613,7 @@ int fwrite( const int fd, const uint8_t *data, const int n ) {
   // if necessary, allocate new blocks to file
   if (ofile->o_head + n > inode->i_ic.ic_size) {
     const int numblks = inode->i_ic.ic_size / BLOCK_SIZE;
-    const int newblks = ((ofile->o_head + n) / BLOCK_SIZE) - numblks;
+    const int newblks = ((ofile->o_head + n) / BLOCK_SIZE) - (numblks - 1);
 
     for (int i = numblks; i < newblks; i++) {
       inode->i_ic.ic_db[ i ] = balloc(); // TODO: deal with indirect blocks too??
@@ -572,7 +623,7 @@ int fwrite( const int fd, const uint8_t *data, const int n ) {
   }
 
   uint8_t buf[ BLOCK_SIZE ]; // block buffer
-  disk_rd( inode->i_ic.ic_db[ ofile->o_head / BLOCK_SIZE ], buf, BLOCK_SIZE ); // load block data
+  uint32_t addr = getDataBlock( buf, inode, ofile->o_head ); // maintain current block addr
 
   // write each byte to disk
   for (int i = 0; i < n; i++) {
@@ -580,12 +631,12 @@ int fwrite( const int fd, const uint8_t *data, const int n ) {
   
     // check not last byte and next addr goes over block boundary
     if (i != n-1 && (ofile->o_head + i + 1) % BLOCK_SIZE == 0) {
-      disk_wr( inode->i_ic.ic_db[ (ofile->o_head + i) / BLOCK_SIZE ], buf, BLOCK_SIZE );     // store
-      disk_rd( inode->i_ic.ic_db[ (ofile->o_head + i + 1) / BLOCK_SIZE ], buf, BLOCK_SIZE ); // load                       
+      disk_wr( addr, buf, BLOCK_SIZE );                         // store
+      addr = getDataBlock( buf, inode, ofile->o_head + i + 1 ); // load                       
     }
   }
 
-  disk_wr( inode->i_ic.ic_db[ (ofile->o_head + n - 1) / BLOCK_SIZE ], buf, BLOCK_SIZE );
+  disk_wr( addr, buf, BLOCK_SIZE );
   ofile->o_head += n;
 
   return 0;
@@ -604,7 +655,7 @@ int fread( const int fd, uint8_t *data, const int n ) {
     return -1;
 
   uint8_t buf[ BLOCK_SIZE ]; // block buffer
-  disk_rd( inode->i_ic.ic_db[ ofile->o_head / 8 ], buf, BLOCK_SIZE ); // load block data
+  getDataBlock( buf, inode, ofile->o_head );
 
   // read each byte to from
   for (int i = 0; i < n; i++) {
@@ -612,7 +663,7 @@ int fread( const int fd, uint8_t *data, const int n ) {
   
     // check not last byte and next addr goes over block boundary
     if (i != n-1 && (ofile->o_head + i + 1) % BLOCK_SIZE == 0)
-      disk_rd( inode->i_ic.ic_db[ (ofile->o_head + i + 1) / BLOCK_SIZE ], buf, BLOCK_SIZE ); // load                       
+      getDataBlock( buf, inode, (ofile->o_head + i + 1) );                
   }
 
   ofile->o_head += n;
@@ -801,8 +852,6 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
         PL011_putc( UART0, '\n' );
 	    }
 
-      // PL011_putc( UART0, '\n' );
-
       break;
     }
     case 0x10 : { // mkdir
@@ -885,6 +934,15 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
 
       ctx->gpr[ 0 ] = 0; // success
 
+      break;
+    }
+    case 0x12 : { // rm
+      break;
+    }
+    case 0x13 : { // mv
+      break;
+    }
+    case 0x14 : { // cp
       break;
     }
     default   : { // unknown

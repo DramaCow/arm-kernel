@@ -194,6 +194,18 @@ int cd( const char *path ) {
   return r;
 }
 
+int rm( const char *name ) {
+  return 0;
+}
+
+int mv( const char *src, const char *dest ) {
+  return 0;
+}
+
+int cp( const char *src, const char *dest ) {
+  return 0;
+}
+
 // =========================
 // === HELPFUL FUNCTIONS ===
 // =========================

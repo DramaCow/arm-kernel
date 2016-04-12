@@ -45,6 +45,9 @@ void pwd();
 void ls();
 int mkdir( const char *name );
 int cd( const char *path );
+int rm( const char *name );
+int mv( const char *src, const char *dest );
+int cp( const char *src, const char *dest );
 
 // =========================
 // === HELPFUL FUNCTIONS ===
