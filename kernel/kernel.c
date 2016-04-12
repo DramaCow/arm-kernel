@@ -671,6 +671,29 @@ int fread( const int fd, uint8_t *data, const int n ) {
   return 0;
 }
 
+int lseek( const int fd, uint32_t offset, const int whence ) {
+  // validate file descriptor
+  if (fd < 0 || fd >= FDT_LIMIT) return -1;
+  if (current->fd[ fd ] == NULL) return -1;
+
+  switch (whence) {
+    case SEEK_SET : {
+      current->fd[ fd ]->o_head = offset;
+      break;
+    }
+    case SEEK_CUR : {
+      current->fd[ fd ]->o_head += offset;
+      break;
+    }
+    case SEEK_END : {
+      current->fd[ fd ]->o_head = current->fd[ fd ]->o_inptr->i_ic.ic_size + offset;
+      break;
+    }
+    default: return -1;
+  }
+  return current->fd[ fd ]->o_head;
+}
+
 // =====================================
 // === INTERRUPTS / SUPERVISOR CALLS ===
 // =====================================
@@ -781,8 +804,8 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       exec( ctx, ctx->gpr[ 0 ] );
       break;
     }
-    case 0x05 : {
-      // UNUSED
+    case 0x05 : { // lseek
+      ctx->gpr[ 0 ] = lseek( ctx->gpr[ 0 ], ctx->gpr[ 1 ], ctx->gpr[ 2 ] );
       break;
     }
     case 0x06 : { // kill

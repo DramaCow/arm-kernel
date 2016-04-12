@@ -36,6 +36,7 @@ int read( int fd, void* x, size_t n );
 void disk_wipe();
 int fopen( const char *path );
 int fclose( const int fd );
+int fseek( const int fd, uint32_t offset, const int whence );
 
 // ===========================
 // === DIRECTORY FUNCTIONS ===

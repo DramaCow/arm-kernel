@@ -9,4 +9,10 @@ typedef enum { // extreme subset of signals
   SIGCONT
 } sig_t; //signal
 
+typedef enum {
+  SEEK_SET,
+  SEEK_CUR,
+  SEEK_END
+} whence_t; // seek
+
 #endif

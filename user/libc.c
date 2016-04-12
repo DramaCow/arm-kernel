@@ -156,6 +156,21 @@ int fclose( const int fd ) {
   return r; 
 }
 
+int fseek( const int fd, uint32_t offset, const int whence ) {
+  int r;
+
+  asm volatile( "mov r0, %1 \n"
+                "mov r1, %2 \n"
+                "mov r2, %3 \n"
+                "svc #5     \n"
+                "mov %0, r0 \n" 
+              : "=r" (r) 
+              : "r" (fd), "r" (offset), "r" (whence) 
+              : "r0"                                 );
+
+  return r; 
+}
+
 // ===========================
 // === DIRECTORY FUNCTIONS ===
 // ===========================
