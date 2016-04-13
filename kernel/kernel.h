@@ -89,6 +89,38 @@ typedef struct {
   uint32_t o_head; // r/w head position
 } ofile_t; // open file
 
+// === BLOCK ALLOCATION FUNCTIONS ===
+
+daddr32_t balloc();
+int bfree( daddr32_t a );
+
+// === SUPERBLOCK FUNCTIONS ===
+
+void wipe();
+
+// === DATA BLOCK FUNCTIONS ===
+
+int getDataBlockAddr( const inode_t *inode, uint32_t byte );
+int allocateDataBlocks( inode_t *inode, uint32_t n );
+int freeDataBlocks( inode_t *inode );
+int getDataBlock( uint8_t *block, const inode_t *inode, uint32_t byte );
+
+// === INODE FUNCTIONS ===
+
+inode_t *copyInode( inode_t *copy, inode_t *inode );
+inode_t *readInode( inode_t *in, int ino );
+inode_t *writeInode( inode_t *inode );
+inode_t * getFreeInode( inode_t *in );
+dir_t *getLastDir( dir_t *d, const inode_t *inode );
+int remove_inode( dir_t *child, inode_t *parent, const char *name );
+int name_to_ino( const char *name, const inode_t *in );
+int path_to_ino( const char *path, const int dir );
+int path_to_ino2( const char *path, const int dir );
+
+// === DIRECTORIES FUNCTIONS ===
+
+void addInodeToDirectory( inode_t* par, uint32_t ino, const char *name );
+
 // ========================================================
 
 #define PROCESS_LIMIT 8                      // limit on number of processes running at once     (global)

@@ -17,12 +17,12 @@ void init() {
 /*  int f2 = cfork();*/
 /*  if (f2 == 0) cexec(0);*/
 
-  char x[32];
+  char x[64];
   char* tok;
 
   while( 1 ) {
     write( STDIO, "$ ", 2 );
-    read( STDIO, x, 16);
+    read( STDIO, x, 64);
     tok = strtok(x, " ");
 
     if      (strncmp(tok, "run", 3) == 0) {
@@ -64,13 +64,13 @@ void init() {
       cd( strtok( NULL, " \n\r" ) );
     }
     else if (strncmp(tok, "rm", 2) == 0) {
-
+      rm( strtok( NULL, " \n\r" ) );
     }
     else if (strncmp(tok, "mv", 2) == 0) {
-
+      mv( strtok( NULL, " \n\r" ), strtok( NULL, " \n\r" ) );
     }
     else if (strncmp(tok, "cp", 2) == 0) {
-
+      cp( strtok( NULL, " \n\r" ), strtok( NULL, " \n\r" ) );
     }
 
     yield(); // gets rid of reading delay

@@ -332,11 +332,46 @@ void wipe() {
 
 // === DATA BLOCK FUNCTIONS ===
 
+int getDataBlockAddr( const inode_t *inode, uint32_t byte ) { 
+  int blk = byte / BLOCK_SIZE;
+
+  // Direct block
+  if (blk < 10) {
+    return (int)inode->i_ic.ic_db[ blk ];
+  }
+  // Indirect blocks
+  else {
+    const int ls = BLOCK_SIZE/4;
+    uint8_t block[ BLOCK_SIZE ];
+
+    if      (blk <= ls + 10) {
+      blk -= 10; 
+      disk_rd( inode->i_ic.ic_ib[ 0 ], block, BLOCK_SIZE );
+      return ((int*)block)[ blk ];
+    }
+    else if (blk <= ls*ls + ls + 10) {
+      blk -= ls + 10;
+      disk_rd( inode->i_ic.ic_ib[ 1 ], block, BLOCK_SIZE );
+      disk_rd( ((uint32_t*)block)[ blk/ls ], block, BLOCK_SIZE );
+      return ((int*)block)[ blk%ls ];
+    }
+    else if (blk <= ls*ls*ls + ls*ls + ls + 10) {
+      blk -= ls*ls + ls + 10;
+      disk_rd( inode->i_ic.ic_ib[ 2 ], block, BLOCK_SIZE );
+      disk_rd( ((uint32_t*)block)[ blk/(ls*ls) ], block, BLOCK_SIZE );
+      disk_rd( ((uint32_t*)block)[ (blk%(ls*ls))/ls ], block, BLOCK_SIZE );
+      return ((int*)block)[ blk%ls ];
+    }
+  } 
+
+  return -1;
+}
+
 int allocateDataBlocks( inode_t *inode, uint32_t n ) {
   const int b = inode->i_ic.ic_size / BLOCK_SIZE;
 
   for (int i = b; i < b + n; i++) { 
-    if (b < 10) {
+    if (i < 10) {
       inode->i_ic.ic_db[ i ] = balloc();
     }
   }
@@ -344,42 +379,37 @@ int allocateDataBlocks( inode_t *inode, uint32_t n ) {
   return 0;
 }
 
-int getDataBlock( uint8_t *block, const inode_t *inode, uint32_t byte ) { 
-  int blk = byte / BLOCK_SIZE;
-  int addr = -1;
-
-  // Direct block
-  if (blk < 10) {
-    disk_rd( addr = inode->i_ic.ic_db[ blk ], block, BLOCK_SIZE );
+int freeDataBlocks( inode_t *inode ) {
+  for (int i = 0; i < inode->i_ic.ic_size; i += BLOCK_SIZE) { 
+    bfree( getDataBlockAddr( inode, i ) );
   }
-  // Indirect blocks
-  else {
-    const int ls = BLOCK_SIZE/4;
 
-    if      (blk <= ls + 10) {
-      blk -= 10; 
-      disk_rd( inode->i_ic.ic_ib[ 0 ], block, BLOCK_SIZE );
-      disk_rd( addr = ((uint32_t*)block)[ blk ], block, BLOCK_SIZE );
-    }
-    else if (blk <= ls*ls + ls + 10) {
-      blk -= ls + 10;
-      disk_rd( inode->i_ic.ic_ib[ 1 ], block, BLOCK_SIZE );
-      disk_rd( ((uint32_t*)block)[ blk/ls ], block, BLOCK_SIZE );
-      disk_rd( addr = ((uint32_t*)block)[ blk%ls ], block, BLOCK_SIZE );
-    }
-    else if (blk <= ls*ls*ls + ls*ls + ls + 10) {
-      blk -= ls*ls + ls + 10;
-      disk_rd( inode->i_ic.ic_ib[ 2 ], block, BLOCK_SIZE );
-      disk_rd( ((uint32_t*)block)[ blk/(ls*ls) ], block, BLOCK_SIZE );
-      disk_rd( ((uint32_t*)block)[ (blk%(ls*ls))/ls ], block, BLOCK_SIZE );
-      disk_rd( addr = ((uint32_t*)block)[ blk%ls ], block, BLOCK_SIZE );
-    }
-  } 
+  return 0;
+}
 
+int getDataBlock( uint8_t *block, const inode_t *inode, uint32_t byte ) { 
+  int addr = getDataBlockAddr( inode, byte );
+  disk_rd( addr, block, BLOCK_SIZE );
   return addr;
 }
 
 // === INODE FUNCTIONS ===
+
+inode_t *copyInode( inode_t *copy, inode_t *inode ) {
+  if (getFreeInode( copy ) == NULL)
+    return NULL;
+  allocateDataBlocks( copy, (inode->i_ic.ic_size / BLOCK_SIZE) + 1 );
+
+  uint8_t block[ BLOCK_SIZE ];
+
+  for (int i = 0; i < inode->i_ic.ic_size; i += BLOCK_SIZE) { 
+    getDataBlock( block, inode, i );
+    int n = inode->i_ic.ic_size - i > BLOCK_SIZE ? BLOCK_SIZE : inode->i_ic.ic_size - i;
+    disk_wr( getDataBlockAddr( copy, i ), block, n );
+  }
+
+  return copy;
+}
 
 inode_t *readInode( inode_t *in, int ino ) {
 	// TODO: validation in case ino is invalid
@@ -428,6 +458,66 @@ inode_t * getFreeInode( inode_t *in ) {
 	return NULL;
 }
 
+dir_t *getLastDir( dir_t *d, const inode_t *inode ) {
+  const int r = ((inode->i_ic.ic_size / 32) - 1) % 16; // offset of last dir, assumes directory non-empty
+  
+  dir_t dir[ 16 ];
+  getDataBlock( (uint8_t*)dir, inode, inode->i_ic.ic_size - 32);
+
+  memcpy( d, &dir[ r ], sizeof( dir_t ) );
+  return d;
+}
+
+// ehh? this is just a copy - can we do this better??
+int remove_inode( dir_t *child, inode_t *parent, const char *name ) {
+	const int bytes = parent->i_ic.ic_size; // number of bytes
+	const int dirs  = bytes / 32;       // number of directories
+
+  if (dirs > 0) {
+	  const int blks  = ((dirs-1) / 16) + 1;	// number of blocks
+	  const int r		  = dirs % 16;			      // offset in last block
+	
+	  dir_t dir[ 16 ];
+    daddr32_t addr;
+
+    // TODO: check file exists in ai, and prevent removal if so : "error, do not have permission to remove."
+
+	  for (int i = 0; i < blks-1; i++) {
+      addr = getDataBlock( (uint8_t*)dir, parent, BLOCK_SIZE * i );
+		  for (int j = 0; j < 16; j++) {
+			  if (strncmp( name, dir[j].d_name, dir[j].d_namlen >= strlen(name) ? dir[j].d_namlen : strlen(name) ) == 0) {
+          memcpy( child, &dir[ j ], sizeof( dir_t ) );        
+
+          getLastDir( &dir[ j ], parent ); 
+          disk_wr( addr, (uint8_t*)dir, BLOCK_SIZE );
+
+          parent->i_ic.ic_size -= 32;
+          writeInode( parent );
+
+				  return child->d_ino;
+        }
+		  }
+	  }
+
+    addr = getDataBlock( (uint8_t*)dir, parent, BLOCK_SIZE * (blks-1) );
+	  for (int j = 0; j < r; j++) {
+		  if (strncmp( name, dir[j].d_name, dir[j].d_namlen >= strlen(name) ? dir[j].d_namlen : strlen(name) ) == 0) {
+        memcpy( child, &dir[ j ], sizeof( dir_t ) );       
+
+        getLastDir( &dir[ j ], parent ); 
+        disk_wr( addr, (uint8_t*)dir, BLOCK_SIZE );
+        
+        parent->i_ic.ic_size -= 32;
+        writeInode( parent );  
+
+			  return child->d_ino;
+      }
+	  }
+  }
+
+	return -1; // does not exist in directory
+}
+
 int name_to_ino( const char *name, const inode_t *in ) {
 	const int bytes = in->i_ic.ic_size; // number of bytes
 	const int dirs  = bytes / 32;       // number of directories
@@ -441,14 +531,14 @@ int name_to_ino( const char *name, const inode_t *in ) {
 	  for (int i = 0; i < blks-1; i++) {
       getDataBlock( (uint8_t*)dir, in, BLOCK_SIZE * i );
 		  for (int j = 0; j < 16; j++) {
-			  if (strncmp(name, dir[j].d_name, strlen(name)) == 0)
+			  if (strncmp( name, dir[j].d_name, dir[j].d_namlen >= strlen(name) ? dir[j].d_namlen : strlen(name) ) == 0)
 				  return dir[j].d_ino;
 		  }
 	  }
 
     getDataBlock( (uint8_t*)dir, in, BLOCK_SIZE * (blks-1) );
 	  for (int j = 0; j < r; j++) {
-		  if (strncmp(name, dir[j].d_name, strlen(name)) == 0)
+		  if (strncmp( name, dir[j].d_name, dir[j].d_namlen >= strlen(name) ? dir[j].d_namlen : strlen(name) ) == 0)
 			  return dir[j].d_ino;
 	  }
   }
@@ -457,6 +547,23 @@ int name_to_ino( const char *name, const inode_t *in ) {
 }
 
 int path_to_ino( const char *path, const int dir ) {
+  inode_t  inode;
+  int 		 ino = dir;
+  char 	  *tok;
+
+  for (tok = strtok( path, "/" ); 
+	     tok != NULL && ino != -1; 
+	     tok = strtok( NULL, "/" ) ) 
+  {
+    readInode( &inode, ino );
+    ino = name_to_ino( tok, &inode );
+  }
+
+  return ino;
+}
+
+// this version also deals with creating new files
+int path_to_ino2( const char *path, const int dir ) {
 	inode_t  inode;
 	int 		 ino0,  ino = dir;
 	char 	  *tok0, *tok;
@@ -561,10 +668,10 @@ inode_t * getAIT( int ino ) {
 // === POSIX FUNCTIONS ===
 
 int open( const char *path/*, int oflag, ...*/) {
-  int fd = getFD();                         if (fd == -1)      return -1;
-	int ino = path_to_ino( path, ROOT_DIR );  if (ino < 0)       return -1;
-  inode_t *inode = getAIT( ino );           if (inode == NULL) return -1; 
-  ofile_t *ofile = getOFT();                if (ofile == NULL) return -1;
+  int fd = getFD();                          if (fd == -1)      return -1;
+	int ino = path_to_ino2( path, ROOT_DIR );  if (ino < 0)       return -1;
+  inode_t *inode = getAIT( ino );            if (inode == NULL) return -1; 
+  ofile_t *ofile = getOFT();                 if (ofile == NULL) return -1;
 
   // increment number of linked OFT entries to the inode
   inode->i_links++;	
@@ -938,16 +1045,61 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       break;
     }
     case 0x12 : { // rm
+      if ( ((char*)ctx->gpr[ 0 ])[0] == '.' ) {
+        ctx->gpr[ 0 ] = -1;
+        break;
+      }
+
       inode_t inode;
+      dir_t dir;
       readInode( &inode, cwd );
-	    int ino = name_to_ino( (char*)ctx->gpr[ 0 ], &inode );
+      if (remove_inode( &dir, &inode, (char*)ctx->gpr[ 0 ] ) != -1) { 
+        readInode( &inode, dir.d_ino );
+        freeDataBlocks( &inode );
+        inode.i_ic.ic_mode = IFZERO;
+        inode.i_ic.ic_size = 0;
+        writeInode( &inode );  
+      }
 
       break;
     }
-    case 0x13 : { // mv
+    case 0x13 : { // mv   
+      if ( ((char*)ctx->gpr[ 0 ])[0] == '.' ) {
+        ctx->gpr[ 0 ] = -1;
+        break;
+      }
+
+      int ino = path_to_ino( (char*)ctx->gpr[ 1 ], ROOT_DIR ); 
+      if (ino == -1) break;
+      
+      inode_t dest; readInode( &dest, ino );  
+      if (dest.i_ic.ic_mode != IFDIR) break;
+
+      dir_t dir;
+      inode_t inode; readInode( &inode, cwd );
+      if (remove_inode( &dir, &inode, (char*)ctx->gpr[ 0 ] ) != -1) { 
+        addInodeToDirectory( &dest, dir.d_ino, dir.d_name );        
+      }
+  
       break;
     }
     case 0x14 : { // cp
+      if ( ((char*)ctx->gpr[ 0 ])[0] == '.' ) {
+        ctx->gpr[ 0 ] = -1;
+        break;
+      }
+
+      int ino = path_to_ino( (char*)ctx->gpr[ 0 ], cwd ); 
+      if (ino == -1) break;
+      
+      inode_t src; readInode( &src, ino );  
+      if (src.i_ic.ic_mode == IFZERO) break; 
+
+      inode_t dest;
+      copyInode( &dest, &src );
+
+      addInodeToDirectory( readInode( &src, cwd ), dest.i_number, (char*)ctx->gpr[ 1 ] );        
+
       break;
     }
     default   : { // unknown
