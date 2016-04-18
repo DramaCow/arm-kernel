@@ -1,22 +1,6 @@
 #include "init.h"
 
-int program_code( char* id ) {
-  if      (strncmp(id, "P0", 2) == 0) return 0;
-  else if (strncmp(id, "P1", 2) == 0) return 1;
-  else if (strncmp(id, "P2", 2) == 0) return 2;
-  else if (strncmp(id, "P3", 2) == 0) return 3;
-  else if (strncmp(id, "P4", 2) == 0) return 4;
-  else return -1;
-}
-
 void init() {
-
-/*  int f1 = cfork();*/
-/*  if (f1 == 0) cexec(0);*/
-
-/*  int f2 = cfork();*/
-/*  if (f2 == 0) cexec(0);*/
-
   char x[64];
   char* tok;
 
@@ -25,32 +9,26 @@ void init() {
     read( STDIO, x, 64);
     tok = strtok(x, " ");
 
-    if      (strncmp(tok, "run", 3) == 0) {
-      int p = program_code( strtok(NULL, " ") );   
-   
-      if (p != -1) { // if successfully found program        
-        int f = cfork();
+    if      (strncmp(tok, "run", 4) == 0) {       
+      tok = strtok(NULL, " \n\r");
 
-        if (f == 0) {
-          cexec( p );
-        }
-        else if (f == -1) {
-          write( STDIO, "\nmemory fault\n", 14 );
-          break; // May not be necessary?? - memory could become free between fork calls
-        }
+      int f = cfork();
+      if (f == 0) {
+        cexec( tok ); break;
+      }
+      else if (f == -1) {
+        write( STDIO, "memory fault\n", 14 );
       }
     }
     else if (strncmp(tok, "kill", 4) == 0) {
-      // should be 1 digit
-      ckill( str2int( strtok(NULL, " "), 1, 10 ), SIGKILL );
+      ckill( str2int( strtok(NULL, " \n\r"), 1, 10 ), SIGKILL );
     }
     else if (strncmp(tok, "wipe", 4) == 0) {
       disk_wipe();
     }
     else if (strncmp(tok, "quit", 4) == 0) {
-      cexit(); return;
+      break;
     }
-
     else if (strncmp(tok, "pwd", 3) == 0) {
       pwd();
     }
@@ -72,9 +50,29 @@ void init() {
     else if (strncmp(tok, "cp", 2) == 0) {
       cp( strtok( NULL, " \n\r" ), strtok( NULL, " \n\r" ) );
     }
+    else if (strncmp(tok, "cat", 3) == 0) {
+      tok = strtok( NULL, " \n\r" );
+      int FILE = open( tok );
+      if (FILE != -1) {
+        fseek( FILE, 0, SEEK_END );
+        int length = ftell( FILE );
+        fseek( FILE, 0, SEEK_SET );
+
+        char buf[ 512 ]; int n;
+        for (int i = 0; i < length; i+=512) {
+          n = length - i > 512 ? 512 : length - i;
+          read( FILE, &buf, n );
+          write( STDIO, &buf, n );
+        }
+
+        close( FILE );
+      } 
+    }
 
     yield(); // gets rid of reading delay
   }
+
+  cexit();
 }
 
 void (*entry_init)() = &init;

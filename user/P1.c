@@ -24,14 +24,11 @@ void P1() {
 
         // printf( "gcd( %d, %d ) = %d\n", x, y, r );
         write( STDIO, "gcd( ", 5 );
-        int2str( x, buf, 10 );
-        write( STDIO, buf, strlen( buf ) );
+        write_int( STDIO, buf, x );
         write( STDIO, ", ", 2 );
-        int2str( y, buf, 10 );
-        write( STDIO, buf, strlen( buf ) );
+        write_int( STDIO, buf, y );
         write( STDIO, " ) = ", 5 );
-        int2str( r, buf, 10 );
-        write( STDIO, buf, strlen( buf ) );
+        write_int( STDIO, buf, r );
         write( STDIO, "\n", 1 );
       }
     }
@@ -42,5 +39,4 @@ void P1() {
   return;
 }
 
-// TODO: remove when able to dynamically load programs
 void (*entry_P1)() = &P1;

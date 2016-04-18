@@ -12,7 +12,7 @@ void yield();
 // POSIX fork : page 882 and exec : page 772?
 int cfork();
 
-void cexec( uint32_t program ); // DEPRECATED
+void cexec( char *path ); // DEPRECATED
 
 // exit
 void cexit();
@@ -37,6 +37,8 @@ void disk_wipe();
 int fopen( const char *path );
 int fclose( const int fd );
 int fseek( const int fd, uint32_t offset, const int whence );
+
+int ftell( const int fd );
 
 // ===========================
 // === DIRECTORY FUNCTIONS ===

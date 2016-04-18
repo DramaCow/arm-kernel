@@ -14,12 +14,17 @@ int cfork() {
   return f;
 }
 
-void cexec( uint32_t program ) {
-  asm volatile( "mov r0, %0 \n" 
+void cexec( char *path ) {
+  int r;
+
+  asm volatile( "mov r0, %1 \n" 
                 "svc #4     \n"
-              :        
-              : "r" (program)
+                "mov r0, %0 \n"
+              : "=r" (r)       
+              : "r" (path)
               : "r0"            );
+
+  return r;
 }
 
 void cexit() { // TODO: make this a raise sigkill call!
@@ -167,6 +172,19 @@ int fseek( const int fd, uint32_t offset, const int whence ) {
               : "=r" (r) 
               : "r" (fd), "r" (offset), "r" (whence) 
               : "r0"                                 );
+
+  return r; 
+}
+
+int ftell( const int fd ) {
+  int r;
+
+  asm volatile( "mov r0, %1 \n"
+                "svc #21     \n"
+                "mov %0, r0 \n" 
+              : "=r" (r) 
+              : "r" (fd) 
+              : "r0"            );
 
   return r; 
 }

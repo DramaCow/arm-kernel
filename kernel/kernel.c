@@ -129,18 +129,25 @@ uint32_t fork( ctx_t* ctx ) {
   return -1;    // error: no available memory
 }
 
-uint32_t getProgramEntry( uint32_t program ) {
-  switch (program) {
-    case 0x00 : return ( uint32_t )( entry_P0 );
-    case 0x01 : return ( uint32_t )( entry_P1 );
-    case 0x02 : return ( uint32_t )( entry_P2 );
-    case 0x03 : return ( uint32_t )( entry_P3 );
-    case 0x04 : return ( uint32_t )( entry_P4 );
+int getProgramEntry( char *path ) {
+  int ino = path_to_ino( path, ROOT_DIR );
+
+  if (ino != -1 ) {
+    inode_t inode;
+    readInode( &inode, ino );
+    uint32_t block[ BLOCK_SIZE/4 ];
+    getDataBlock( block, &inode, 0 );
+    return block[ 0 ];
   }
-  return NULL;
+
+  return -1; // failed
 }
 
-void exec( ctx_t* ctx, uint32_t program ) {
+int exec( ctx_t* ctx, char *path ) {
+  int entry = getProgramEntry( path );
+  if (entry == -1) 
+    return -1;
+
   int pid = current->pid;
   int pst = current->pst;
 
@@ -148,12 +155,14 @@ void exec( ctx_t* ctx, uint32_t program ) {
   current->pid      = pid;
   current->pst      = pst;
   current->ctx.cpsr = 0x50;
-  current->ctx.pc   = getProgramEntry( program );
-  current->ctx.sp   = ( uint32_t )( (uint32_t)(&tos_init) - current->pid * 0x00001000 );
+  current->ctx.pc   = entry;
+  current->ctx.sp   = ( uint32_t )( (uint32_t)(&tos_init) - current->pid * 0x00010000 );
   current->pst      = EXECUTING;
   current->defp = current->prio = 2;
 
   memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
+
+  return 0;
 }
 
 void kill( pid_t pid, sig_t sig ) {
@@ -234,6 +243,30 @@ int mq_receive(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len) {
 // === FILESYSTEM ===
 // ==================
 
+void createObjFiles() {
+  int FILE;
+
+  FILE = open( "P0.o" );
+  fwrite( FILE, (uint8_t*)&entry_P0, 4 );
+  close( FILE );
+
+  FILE = open( "P1.o" );
+  fwrite( FILE, (uint8_t*)&entry_P1, 4 );
+  close( FILE );
+
+  FILE = open( "P2.o" );
+  fwrite( FILE, (uint8_t*)&entry_P2, 4 );
+  close( FILE );
+
+  FILE = open( "P3.o" );
+  fwrite( FILE, (uint8_t*)&entry_P3, 4 );
+  close( FILE );
+
+  FILE = open( "P4.o" );
+  fwrite( FILE, (uint8_t*)&entry_P4, 4 );
+  close( FILE );
+}
+
 // === BLOCK ALLOCATION FUNCTIONS ===
 
 daddr32_t balloc() { // block allocation
@@ -246,8 +279,15 @@ daddr32_t balloc() { // block allocation
 	// block addr 1 is addr of superblock - indicates no space remaining
 	if (fs.fs_fdb[ fs.fs_fdbhead ] != 1) {
 		daddr32_t addr = fs.fs_fdb[ fs.fs_fdbhead ];
-		disk_rd( addr, (uint8_t*)fs.fs_fdb, 64 * sizeof( daddr32_t ) );
+    
+    uint8_t block[ BLOCK_SIZE ];
+    disk_rd( addr, block, BLOCK_SIZE );
+
+    memcpy( fs.fs_fdb, block, 64 * sizeof( daddr32_t ) );
+    fs.fs_fdbhead = 63;
+
     disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
+
 		return addr;
 	}
 
@@ -256,8 +296,7 @@ daddr32_t balloc() { // block allocation
 
 int bfree( daddr32_t a ) { // block free
 	if (fs.fs_fdbhead < 63) {
-		fs.fs_fdb[ fs.fs_fdbhead ] = a;
-		fs.fs_fdbhead++;
+		fs.fs_fdb[ ++fs.fs_fdbhead ] = a;
     disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
 		return 0; // success
 	}
@@ -327,6 +366,8 @@ void wipe() {
     disk_wr( i + fs.fs_iblkno, (uint8_t *)ic, 8 * sizeof( icommon_t ) );
   }  
 
+  createObjFiles();
+
   return;
 }
 
@@ -336,7 +377,7 @@ int getDataBlockAddr( const inode_t *inode, uint32_t byte ) {
   int blk = byte / BLOCK_SIZE;
 
   // Direct block
-  if (blk < 10) {
+  if (blk < NDADDR) {
     return (int)inode->i_ic.ic_db[ blk ];
   }
   // Indirect blocks
@@ -344,44 +385,204 @@ int getDataBlockAddr( const inode_t *inode, uint32_t byte ) {
     const int ls = BLOCK_SIZE/4;
     uint8_t block[ BLOCK_SIZE ];
 
-    if      (blk <= ls + 10) {
-      blk -= 10; 
+    if      (blk < ls + NDADDR) {
+      blk -= NDADDR; 
       disk_rd( inode->i_ic.ic_ib[ 0 ], block, BLOCK_SIZE );
-      return ((int*)block)[ blk ];
+      return ((uint32_t*)block)[ blk ];
     }
-    else if (blk <= ls*ls + ls + 10) {
-      blk -= ls + 10;
+    else if (blk < ls*ls + ls + NDADDR) {
+      blk -= ls + NDADDR;
       disk_rd( inode->i_ic.ic_ib[ 1 ], block, BLOCK_SIZE );
       disk_rd( ((uint32_t*)block)[ blk/ls ], block, BLOCK_SIZE );
-      return ((int*)block)[ blk%ls ];
+      return ((uint32_t*)block)[ blk%ls ];
     }
-    else if (blk <= ls*ls*ls + ls*ls + ls + 10) {
-      blk -= ls*ls + ls + 10;
+    else if (blk < ls*ls*ls + ls*ls + ls + NDADDR) {
+      blk -= ls*ls + ls + NDADDR;
       disk_rd( inode->i_ic.ic_ib[ 2 ], block, BLOCK_SIZE );
       disk_rd( ((uint32_t*)block)[ blk/(ls*ls) ], block, BLOCK_SIZE );
       disk_rd( ((uint32_t*)block)[ (blk%(ls*ls))/ls ], block, BLOCK_SIZE );
-      return ((int*)block)[ blk%ls ];
+      return ((uint32_t*)block)[ blk%ls ];
     }
   } 
 
   return -1;
 }
 
-int allocateDataBlocks( inode_t *inode, uint32_t n ) {
-  const int b = inode->i_ic.ic_size / BLOCK_SIZE;
+int allocateDataBlockAddr( inode_t *inode, uint32_t byte ) { 
+  int blk = byte / BLOCK_SIZE;
 
-  for (int i = b; i < b + n; i++) { 
-    if (i < 10) {
-      inode->i_ic.ic_db[ i ] = balloc();
+  int addr = balloc();
+  if (addr == -1)
+    return -1;
+
+  // Direct block
+  if (blk < NDADDR) {
+    inode->i_ic.ic_db[ blk ] = addr;
+    writeInode( inode );
+  }
+  // Indirect blocks
+  else {
+    const int ls = BLOCK_SIZE/4;
+    uint8_t block[ BLOCK_SIZE ];
+
+    int taddr;
+
+    if      (blk < ls + NDADDR) {
+      blk -= NDADDR; 
+
+      if (blk == 0) {
+        taddr = balloc();
+        if (taddr == -1)
+          return -1;
+        inode->i_ic.ic_ib[ 0 ] = taddr;
+        writeInode( inode );
+      }
+      else {  
+        taddr = inode->i_ic.ic_ib[ 0 ];
+      }
+
+      disk_rd( taddr, block, BLOCK_SIZE );
+
+      ((uint32_t*)block)[ blk ] = addr;
+      disk_wr( taddr, block, BLOCK_SIZE );
     }
+    else if (blk < ls*ls + ls + NDADDR) {
+      blk -= ls + NDADDR;
+
+      if (blk == 0) {
+        taddr = balloc(); if (taddr == -1) return -1;
+        inode->i_ic.ic_ib[ 1 ] = taddr;
+        writeInode( inode );
+      }
+      else {  
+        taddr = inode->i_ic.ic_ib[ 1 ];
+      }
+
+      disk_rd( taddr, block, BLOCK_SIZE );
+
+      if (blk % ls == 0) {
+        taddr = balloc(); if (taddr == -1) return -1;
+        ((uint32_t*)block)[ blk/ls ] = taddr;
+        disk_wr( taddr, block, BLOCK_SIZE );
+      }
+      else {
+        taddr = ((uint32_t*)block)[ blk/ls ];
+      }
+  
+      disk_rd( taddr, block, BLOCK_SIZE );
+
+      ((uint32_t*)block)[ blk%ls ] = addr;
+      disk_wr( taddr, block, BLOCK_SIZE );
+    }
+    else if (blk < ls*ls*ls + ls*ls + ls + NDADDR) {
+      blk -= ls*ls + ls + NDADDR;
+
+      if (blk == 0) {
+        taddr = balloc(); if (taddr == -1) return -1;
+        inode->i_ic.ic_ib[ 2 ] = taddr;
+        writeInode( inode );
+      }
+      else {  
+        taddr = inode->i_ic.ic_ib[ 2 ];
+      }
+
+      disk_rd( taddr, block, BLOCK_SIZE );
+
+      if (blk % (ls*ls) == 0) {
+        taddr = balloc(); if (taddr == -1) return -1;
+        ((uint32_t*)block)[ blk/(ls*ls) ] = taddr;
+        disk_wr( taddr, block, BLOCK_SIZE );
+      }
+      else {
+        taddr = ((uint32_t*)block)[ blk/(ls*ls) ];
+      }
+  
+      disk_rd( taddr, block, BLOCK_SIZE );
+
+      blk %= ls*ls;
+
+      if (blk % ls == 0) {
+        taddr = balloc(); if (taddr == -1) return -1;
+        ((uint32_t*)block)[ blk/ls ] = taddr;
+        disk_wr( taddr, block, BLOCK_SIZE );
+      }
+      else {
+        taddr = ((uint32_t*)block)[ blk/ls ];
+      }
+  
+      disk_rd( taddr, block, BLOCK_SIZE );
+
+      ((uint32_t*)block)[ blk%ls ] = addr;
+      disk_wr( taddr, block, BLOCK_SIZE );
+    }
+  } 
+
+  return addr;
+}
+
+int allocateDataBlocks( inode_t *inode, uint32_t bytes ) {
+  const int b = inode->i_ic.ic_size / BLOCK_SIZE;
+  const int n = (inode->i_ic.ic_size + bytes) / BLOCK_SIZE;
+
+  for (int i = b+1; i <= n; i++) { 
+    if (allocateDataBlockAddr( inode, i * BLOCK_SIZE ) == -1) 
+      return -1;
   }
 
-  return 0;
+  return inode->i_ic.ic_size += bytes;
 }
 
 int freeDataBlocks( inode_t *inode ) {
   for (int i = 0; i < inode->i_ic.ic_size; i += BLOCK_SIZE) { 
+    // Removing direct or leaf blocks    
     bfree( getDataBlockAddr( inode, i ) );
+
+    // Removing indirect blocks
+    int blk = i / BLOCK_SIZE;
+    if (blk >= NDADDR) {
+      const int ls = BLOCK_SIZE/4;
+      uint8_t block[ BLOCK_SIZE ];
+
+      if      (blk < ls + NDADDR) {
+        blk -= NDADDR;
+        if (blk == 0) {
+          bfree( inode->i_ic.ic_ib[ 0 ] );
+        }
+      }
+      else if (blk < ls*ls + ls + NDADDR) {
+        blk -= ls + NDADDR;
+
+        disk_rd( inode->i_ic.ic_ib[ 1 ], block, BLOCK_SIZE );
+
+        if (blk % ls == 0) {
+          bfree( ((uint32_t*)block)[ blk/ls ] );
+        }
+
+        if (blk == 0) {
+          bfree( inode->i_ic.ic_ib[ 1 ] );
+        }
+      }
+      else if (blk < ls*ls*ls + ls*ls + ls + NDADDR) {
+        blk -= ls*ls + ls + NDADDR;
+
+        disk_rd( inode->i_ic.ic_ib[ 2 ], block, BLOCK_SIZE );
+        disk_rd( ((uint32_t*)block)[ blk / (ls*ls) ], block, BLOCK_SIZE );
+
+        if ((blk % (ls*ls)) % ls == 0) {
+          bfree( ((uint32_t*)block)[ (blk % (ls*ls))/ls ] );
+        }
+
+        disk_rd( inode->i_ic.ic_ib[ 2 ], block, BLOCK_SIZE );
+
+        if (blk % (ls*ls) == 0) {
+          bfree( ((uint32_t*)block)[ blk/(ls*ls) ] );
+        }
+
+        if (blk == 0) {
+          bfree( inode->i_ic.ic_ib[ 2 ] );
+        }
+      }
+    }
   }
 
   return 0;
@@ -431,10 +632,10 @@ inode_t *writeInode( inode_t *inode ) {
 	const int r = inode->i_number % 8;
 	
 	icommon_t ic[ 8 ];
-	disk_rd( fs.fs_iblkno + q, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
+	disk_rd( fs.fs_iblkno + q, (uint8_t*)ic, BLOCK_SIZE );
 
   ic[ r ] = inode->i_ic;
-  disk_wr( fs.fs_iblkno + q, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
+  disk_wr( fs.fs_iblkno + q, (uint8_t*)ic, BLOCK_SIZE );
 	
 	return inode;
 } 
@@ -444,17 +645,15 @@ inode_t * getFreeInode( inode_t *in ) {
 	for (int i = 0; i < fs.fs_isize/8; i++) {
 		disk_rd( fs.fs_iblkno + i, (uint8_t*)ic, 8 * sizeof( icommon_t ) );
 		for (int j = 0; j < 8; j++) {
-			// icommon is unused
-			if (ic[ j ].ic_mode == IFZERO) {
+			if (ic[ j ].ic_mode == IFZERO) { // inode unused
 				in->i_number     = 8*i + j;
         in->i_ic.ic_mode = IFREG;
-				// TODO: reset icommon metadata
+        in->i_ic.ic_size = 0;
 				return in;
 			}
 		}
 	}
 
-	// no available inodes
 	return NULL;
 }
 
@@ -468,7 +667,6 @@ dir_t *getLastDir( dir_t *d, const inode_t *inode ) {
   return d;
 }
 
-// ehh? this is just a copy - can we do this better??
 int remove_inode( dir_t *child, inode_t *parent, const char *name ) {
 	const int bytes = parent->i_ic.ic_size; // number of bytes
 	const int dirs  = bytes / 32;       // number of directories
@@ -610,11 +808,11 @@ int path_to_ino2( const char *path, const int dir ) {
 
 void addInodeToDirectory( inode_t* par, uint32_t ino, const char *name ) {
   const int r	= (par->i_ic.ic_size / 32) % 16; // offset in block
-  if (r == 0) {
-    allocateDataBlocks( par, 1 );
+  if (r == 0 && par->i_ic.ic_size > 0) {
+    allocateDataBlockAddr( par, par->i_ic.ic_size ); // TODO: validate
   }
-
-  dir_t dir[ 16 ];	
+  
+  dir_t dir[ 16 ];
   daddr32_t addr = getDataBlock( (uint8_t*)dir, par, par->i_ic.ic_size );
 
   dir[ r ].d_ino    = ino;
@@ -716,16 +914,8 @@ int fwrite( const int fd, const uint8_t *data, const int n ) {
   inode_t *inode = ofile->o_inptr;
 
   // if necessary, allocate new blocks to file
-  if (ofile->o_head + n > inode->i_ic.ic_size) {
-    const int numblks = inode->i_ic.ic_size / BLOCK_SIZE;
-    const int newblks = ((ofile->o_head + n) / BLOCK_SIZE) - (numblks - 1);
-
-    for (int i = numblks; i < newblks; i++) {
-      inode->i_ic.ic_db[ i ] = balloc(); // TODO: deal with indirect blocks too??
-    }
-  
-    inode->i_ic.ic_size = ofile->o_head + n;
-  }
+  if (ofile->o_head + n > inode->i_ic.ic_size)
+    allocateDataBlocks( inode, ofile->o_head + n - inode->i_ic.ic_size );
 
   uint8_t buf[ BLOCK_SIZE ]; // block buffer
   uint32_t addr = getDataBlock( buf, inode, ofile->o_head ); // maintain current block addr
@@ -796,6 +986,14 @@ int lseek( const int fd, uint32_t offset, const int whence ) {
     }
     default: return -1;
   }
+  return current->fd[ fd ]->o_head;
+}
+
+int tell( const int fd ) {
+  // validate file descriptor
+  if (fd < 0 || fd >= FDT_LIMIT) return -1;
+  if (current->fd[ fd ] == NULL) return -1;
+
   return current->fd[ fd ]->o_head;
 }
 
@@ -895,7 +1093,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
           PL011_putc( UART0, x[i] );
         }
 
-        ctx->gpr[ 0 ] = n; // unnecessary?
+        ctx->gpr[ 0 ] = n;
         break;
       }
       ctx->gpr[ 0 ] = fread( fd, (uint8_t*)ctx->gpr[ 1 ], ctx->gpr[ 2 ]);
@@ -906,7 +1104,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       break;
     }
     case 0x04 : { // exec
-      exec( ctx, ctx->gpr[ 0 ] );
+      ctx->gpr[ 0 ] = exec( ctx, (char*)ctx->gpr[ 0 ] );
       break;
     }
     case 0x05 : { // lseek
@@ -1080,6 +1278,8 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       if (remove_inode( &dir, &inode, (char*)ctx->gpr[ 0 ] ) != -1) { 
         addInodeToDirectory( &dest, dir.d_ino, dir.d_name );        
       }
+
+      disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
   
       break;
     }
@@ -1100,9 +1300,15 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
 
       addInodeToDirectory( readInode( &src, cwd ), dest.i_number, (char*)ctx->gpr[ 1 ] );        
 
+      disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
+
       break;
     }
-    default   : { // unknown
+    case 0x15 : { // tell
+      ctx->gpr[ 0 ] = tell( ctx->gpr[ 0 ] );
+      break;
+    }
+    default: {
       break;
     }
   }

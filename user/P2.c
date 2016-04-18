@@ -21,11 +21,9 @@ void P2() {
 
       // printf( "weight( %d ) = %d\n", x, r );
       write( STDIO, "weight( ", 8 );
-      int2str( x, buf, 10 );
-      write( STDIO, buf, strlen( buf ) );
+      write_int( STDIO, buf, x );
       write( STDIO, " ) = ", 5 );
-      int2str( r, buf, 10 );
-      write( STDIO, buf, strlen( buf ) );
+      write_int( STDIO, buf, r );
       write( STDIO, "\n", 1 );
     }
   }

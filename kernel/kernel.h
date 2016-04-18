@@ -38,6 +38,8 @@
 #define NIADDR 3                             // number of indirect blocks per icommon
 #define MAXNAMLEN 25                         // max number of characters in "inode name"
 
+extern uint32_t tos_text;
+
 typedef uint32_t daddr32_t; // 32-bit disk block address
 
 typedef struct {

@@ -15,7 +15,6 @@ int is_prime( uint32_t x ) {
 }
 
 void P0() {
-  int x = 0;
   char buf[12];
 
   while( 1 ) {
@@ -29,9 +28,7 @@ void P0() {
       write_int( STDIO, buf, x );
       write( STDIO, " ) = ", 5 );
       write_int( STDIO, buf, r );
-      write( STDIO, "\n", 1 ); 
-      
-      //yield();  
+      write( STDIO, "\n", 1 );  
     }
   }
 

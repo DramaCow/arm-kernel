@@ -1,1 +1,2 @@
-od -A d -t d4 -j 1024 -N 512 device/disk.bin | head
+#!/bin/bash
+od -A d -t $1 -j $(($2*512)) -N 512 device/disk.bin | head

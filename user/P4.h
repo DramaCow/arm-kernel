@@ -8,6 +8,5 @@
 
 // define symbols for P1 entry point and top of stack
 extern void (*entry_P4)(); 
-extern uint32_t tos_P4;
 
 #endif
