@@ -8,11 +8,102 @@ mqueue mq[ MSGCHAN_LIMIT ];
 ofile_t of[ OFT_LIMIT ]; uint32_t of_size; // open file table
 inode_t ai[ AIT_LIMIT ]; uint32_t ai_size; // available inodes table
 
-fs_t fs; // filesystem metadata
-
+fs_t fs;      // filesystem metadata
 uint32_t cwd; // current working directory inode
-char cwdn[ 256 ]; // string name
-uint16_t cwdnlen;
+
+// =================
+// === PROCESSES ===
+// =================
+
+uint32_t fork( ctx_t* ctx ) {
+  pid_t p; // next available pid
+  for (p = 0; p < PROCESS_LIMIT; p++) {                          // lowest available pid
+    if (pcb[ p ].pst == TERMINATED) {                // process block space available
+      pcb[ p ].pid                  = p;
+      pcb[ p ].prt                  = current->pid;
+      memcpy( &pcb[ p ].ctx, ctx, sizeof( ctx_t ));
+      pcb[ p ].ctx.gpr[ 0 ]         = 0; // return value of child process
+      pcb[ p ].pst                  = EXECUTING;
+      pcb[ p ].defp = pcb[ p ].prio = 100;
+
+      rq_add(p);
+
+      return p; // return value as child pid for parent process
+    }
+  }
+  return -1;    // error: no available memory
+}
+
+int getProgramEntry( char *path ) {
+  int ino = path_to_ino( path, ROOT_DIR );
+
+  if (ino != -1 ) {
+    inode_t inode;
+    readInode( &inode, ino );
+    uint32_t block[ BLOCK_SIZE/4 ];
+    getDataBlock( (uint8_t*)block, &inode, 0 );
+    return block[ 0 ];
+  }
+
+  return -1; // failed
+}
+
+int exec( ctx_t* ctx, char *path ) {
+  int entry = getProgramEntry( path );
+  if (entry == -1) 
+    return -1;
+
+  int pid = current->pid;
+  int pst = current->pst;
+
+  memset( current, 0, sizeof( pcb_t ) );
+  current->pid      = pid;
+  current->pst      = pst;
+  current->ctx.cpsr = 0x50;
+  current->ctx.pc   = entry;
+  current->ctx.sp   = ( uint32_t )( (uint32_t)(&tos_init) - current->pid * 0x00010000 );
+  current->pst      = EXECUTING;
+  current->defp = current->prio = 2;
+
+  memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
+
+  return 0;
+}
+
+void kill( pid_t pid, sig_t sig ) {
+  if (0 <= pid && pid <= PROCESS_LIMIT) {
+    switch (sig) {
+      case SIGKILL: { // enforced immediately
+        pcb[ pid ].pst = TERMINATED;
+        rq_rm( pid );
+        break; 
+      }
+      case SIGWAIT: { // enforced immediately
+        pcb[ pid ].pst = WAITING;
+        break;
+      }
+      case SIGCONT: { // enforced immediately
+        if (pcb[ pid ].pst == WAITING)
+          pcb[ pid ].pst = EXECUTING;
+        break;
+      }
+      case SIGPRI0: { // enforced immediately
+        pcb[ pid ].defp = 0;
+        pcb[ pid ].prio = 0;
+        break;
+      }
+    }
+  }
+  else if (pid == 9 && sig == SIGKILL) {
+    for (pid_t p = 1; p < PROCESS_LIMIT; p++) {
+      pcb[ p ].pst = TERMINATED;
+    }
+  }
+}
+
+// ==================
+// === SCHEDULING ===
+// ==================
 
 int cmp_pcb( const void* p1, const void* p2 ) {
   // Empty entries go at back of list
@@ -110,87 +201,6 @@ void scheduler( ctx_t* ctx ) {
   }
 }
 
-uint32_t fork( ctx_t* ctx ) {
-  pid_t p; // next available pid
-  for (p = 0; p < PROCESS_LIMIT; p++) {                          // lowest available pid
-    if (pcb[ p ].pst == TERMINATED) {                // process block space available
-      pcb[ p ].pid                  = p;
-      pcb[ p ].prt                  = current->pid;
-      memcpy( &pcb[ p ].ctx, ctx, sizeof( ctx_t ));
-      pcb[ p ].ctx.gpr[ 0 ]         = 0; // return value of child process
-      pcb[ p ].pst                  = EXECUTING;
-      pcb[ p ].defp = pcb[ p ].prio = 100;
-
-      rq_add(p);
-
-      return p; // return value as child pid for parent process 
-    }
-  }
-  return -1;    // error: no available memory
-}
-
-int getProgramEntry( char *path ) {
-  int ino = path_to_ino( path, ROOT_DIR );
-
-  if (ino != -1 ) {
-    inode_t inode;
-    readInode( &inode, ino );
-    uint32_t block[ BLOCK_SIZE/4 ];
-    getDataBlock( block, &inode, 0 );
-    return block[ 0 ];
-  }
-
-  return -1; // failed
-}
-
-int exec( ctx_t* ctx, char *path ) {
-  int entry = getProgramEntry( path );
-  if (entry == -1) 
-    return -1;
-
-  int pid = current->pid;
-  int pst = current->pst;
-
-  memset( current, 0, sizeof( pcb_t ) );
-  current->pid      = pid;
-  current->pst      = pst;
-  current->ctx.cpsr = 0x50;
-  current->ctx.pc   = entry;
-  current->ctx.sp   = ( uint32_t )( (uint32_t)(&tos_init) - current->pid * 0x00010000 );
-  current->pst      = EXECUTING;
-  current->defp = current->prio = 2;
-
-  memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
-
-  return 0;
-}
-
-void kill( pid_t pid, sig_t sig ) {
-  if (0 <= pid && pid <= PROCESS_LIMIT) {
-    switch (sig) {
-      case SIGKILL: { // enforced immediately
-        pcb[ pid ].pst = TERMINATED;
-        rq_rm( pid );
-        break; 
-      }
-      case SIGWAIT: { // enforced immediately
-        pcb[ pid ].pst = WAITING;
-        break;
-      }
-      case SIGCONT: { // enforced immediately
-        if (pcb[ pid ].pst == WAITING)
-          pcb[ pid ].pst = EXECUTING;
-        break;
-      }
-    }
-  }
-  else if (pid == 9 && sig == SIGKILL) {
-    for (pid_t p = 1; p < PROCESS_LIMIT; p++) {
-      pcb[ p ].pst = TERMINATED;
-    }
-  }
-}
-
 // ======================
 // === MESSAGE QUEUES ===
 // ======================
@@ -206,6 +216,13 @@ int mq_open(int name) {
   for (mqd_t i = 0; i < MSGCHAN_LIMIT; i++) {
     if (mq[ i ].msg_qname == 0) {
       mq[ i ].msg_qname = name;
+
+      mq[ i ].msg_qnum = 0;
+      mq[ i ].msg_qrec = 0;
+
+      mq[ i ].msg_lspid = 0;
+      mq[ i ].msg_lrpid = 0;
+
       return i;
     }
   }
@@ -215,10 +232,15 @@ int mq_open(int name) {
 
 int mq_send(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len) {
   mq[ mqd ].msg_lspid = current->pid;
+  kill( current->pid, SIGWAIT );
 
   if (mq[ mqd ].msg_qnum == 0) { // space on mqueue
     mq[ mqd ].msg_qnum++;
     memcpy( mq[ mqd ].msg_qbuf, msg_ptr, msg_len );
+    if (mq[ mqd ].msg_qrec == 1) {
+      kill( mq[ mqd ].msg_lrpid, SIGCONT ); // wake receiver
+      mq[ mqd ].msg_qrec = 0;
+    }
     return 0;
   }
 
@@ -233,8 +255,11 @@ int mq_receive(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len) {
     mq[ mqd ].msg_qnum--;
     memcpy( msg_ptr, mq[ mqd ].msg_qbuf, msg_len );
     kill( mq[ mqd ].msg_lspid, SIGCONT ); // wake sender
-    return sizeof(msg_ptr); // just some success value (it doesn't matter so long as it's positive)
+    return msg_len; // just some success value (it doesn't matter so long as it's positive)
   }
+
+  mq[ mqd ].msg_qrec = 1; // tells queue a process is waiting for data
+  kill( current->pid, SIGWAIT );
 
   return -1;
 }
@@ -246,24 +271,36 @@ int mq_receive(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len) {
 void createObjFiles() {
   int FILE;
 
-  FILE = open( "P0.o" );
+  FILE = open( "P0", O_CREAT );
   fwrite( FILE, (uint8_t*)&entry_P0, 4 );
   close( FILE );
 
-  FILE = open( "P1.o" );
+  FILE = open( "P1", O_CREAT );
   fwrite( FILE, (uint8_t*)&entry_P1, 4 );
   close( FILE );
 
-  FILE = open( "P2.o" );
+  FILE = open( "P2", O_CREAT );
   fwrite( FILE, (uint8_t*)&entry_P2, 4 );
   close( FILE );
 
-  FILE = open( "P3.o" );
-  fwrite( FILE, (uint8_t*)&entry_P3, 4 );
+  FILE = open( "het", O_CREAT );
+  fwrite( FILE, (uint8_t*)&entry_het, 4 );
   close( FILE );
 
-  FILE = open( "P4.o" );
-  fwrite( FILE, (uint8_t*)&entry_P4, 4 );
+  FILE = open( "ping", O_CREAT );
+  fwrite( FILE, (uint8_t*)&entry_ping, 4 );
+  close( FILE );
+
+  FILE = open( "pong", O_CREAT );
+  fwrite( FILE, (uint8_t*)&entry_pong, 4 );
+  close( FILE );
+
+  FILE = open( "MESSAGE", O_CREAT );
+  fwrite( FILE, (uint8_t*)&entry_MESSAGE, 4 );
+  close( FILE );
+  
+  FILE = open( "CABB", O_CREAT );
+  fwrite( FILE, (uint8_t*)&entry_CABB, 4 );
   close( FILE );
 }
 
@@ -744,7 +781,7 @@ int name_to_ino( const char *name, const inode_t *in ) {
 	return -1; // does not exist in directory
 }
 
-int path_to_ino( const char *path, const int dir ) {
+int path_to_ino( char *path, const int dir ) {
   inode_t  inode;
   int 		 ino = dir;
   char 	  *tok;
@@ -761,7 +798,7 @@ int path_to_ino( const char *path, const int dir ) {
 }
 
 // this version also deals with creating new files
-int path_to_ino2( const char *path, const int dir ) {
+int path_to_ino2( char *path, const int dir ) {
 	inode_t  inode;
 	int 		 ino0,  ino = dir;
 	char 	  *tok0, *tok;
@@ -865,9 +902,12 @@ inode_t * getAIT( int ino ) {
 
 // === POSIX FUNCTIONS ===
 
-int open( const char *path/*, int oflag, ...*/) {
+int open( char *path, int oflag) {
   int fd = getFD();                          if (fd == -1)      return -1;
-	int ino = path_to_ino2( path, ROOT_DIR );  if (ino < 0)       return -1;
+	int ino = 0;
+  if (oflag == O_CREAT) ino = path_to_ino2( path, ROOT_DIR );  
+  else                  ino = path_to_ino( path, ROOT_DIR );
+  if (ino < 0) return -1;
   inode_t *inode = getAIT( ino );            if (inode == NULL) return -1; 
   ofile_t *ofile = getOFT();                 if (ofile == NULL) return -1;
 
@@ -1022,9 +1062,11 @@ void kernel_handler_rst( ctx_t* ctx ) {
 
   // set up default working directory
   cwd       = ROOT_DIR;
-  cwdnlen   = 0;
 
-  TIMER0->Timer1Load     = 0x00100000; // select period = 2^20 ticks ~= 1 sec
+  UART0->IMSC           |= 0x00000010; // enable UART    (Rx) interrupt
+  UART0->CR              = 0x00000301; // enable UART (Tx+Rx)
+
+  TIMER0->Timer1Load     = 0x00001000; // select period = 2^20 ticks ~= 1 sec
   TIMER0->Timer1Ctrl     = 0x00000002; // select 32-bit   timer
   TIMER0->Timer1Ctrl    |= 0x00000040; // select periodic timer
   TIMER0->Timer1Ctrl    |= 0x00000020; // enable          timer interrupt
@@ -1032,6 +1074,7 @@ void kernel_handler_rst( ctx_t* ctx ) {
 
   GICC0->PMR             = 0x000000F0; // unmask all            interrupts
   GICD0->ISENABLER[ 1 ] |= 0x00000010; // enable timer          interrupt
+  GICD0->ISENABLER[ 1 ] |= 0x00001000; // enable UART    (Rx) interrupt
   GICC0->CTLR            = 0x00000001; // enable GIC interface
   GICD0->CTLR            = 0x00000001; // enable GIC distributor
 
@@ -1047,6 +1090,14 @@ void kernel_handler_irq( ctx_t* ctx ) {
   if( id == GIC_SOURCE_TIMER0 ) {
     scheduler( ctx );
     TIMER0->Timer1IntClr = 0x01;
+  }
+  else if( id == GIC_SOURCE_UART0 ) {
+    if (pcb[ 0 ].defp == 0) {
+      pcb[ 0 ].defp = 1000;
+      pcb[ 0 ].prio = 1000;
+      scheduler( ctx );
+    }
+    UART0->ICR = 0x10;
   }
 
   GICC0->EOIR = id; // write the interrupt identifier to signal we're done
@@ -1126,10 +1177,14 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     }
     case 0x09 : { // channel send
       ctx->gpr[ 0 ] = mq_send( ctx->gpr[ 0 ], (uint8_t*)ctx->gpr[ 1 ], (size_t)ctx->gpr[ 2 ] );
+      if (ctx->gpr[ 0 ] == -1)
+        scheduler( ctx );
       break;
     }
     case 0x0a : { // channel receive
       ctx->gpr[ 0 ] = mq_receive( ctx->gpr[ 0 ], (uint8_t*)ctx->gpr[ 1 ], (size_t)ctx->gpr[ 2 ] );
+      if (ctx->gpr[ 0 ] == -1)
+        scheduler( ctx );
       break;
     }
     case 0x0b : { // reformat
@@ -1138,7 +1193,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     }
     case 0x0c : { // open file
       char* path = ( char* )( ctx->gpr[ 0 ] );  
-      ctx->gpr[ 0 ] = open( path );
+      ctx->gpr[ 0 ] = open( path, ctx->gpr[ 1 ] );
       break;
     }
     case 0x0d : { // close file
@@ -1147,9 +1202,6 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     }
     case 0x0e : { // pwd
       PL011_putc( UART0, '/' );
-      for( int i = 0; i < cwdnlen; i++ )
-        PL011_putc( UART0, cwdn[ i ] );
-      PL011_putc( UART0, '\n' );
       break;
     }
     case 0x0f : { // ls
@@ -1235,8 +1287,6 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
       }
 
       cwd = ino;
-
-      // TODO: update cwdn
 
       ctx->gpr[ 0 ] = 0; // success
 

@@ -6,7 +6,8 @@
 typedef enum { // extreme subset of signals
   SIGKILL,
   SIGWAIT,
-  SIGCONT
+  SIGCONT,
+  SIGPRI0
 } sig_t; //signal
 
 typedef enum {
@@ -14,5 +15,10 @@ typedef enum {
   SEEK_CUR,
   SEEK_END
 } whence_t; // seek
+
+typedef enum {
+  O_CREAT,
+  O_EXIST
+} oflag_t; 
 
 #endif

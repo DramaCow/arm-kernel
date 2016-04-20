@@ -12,7 +12,7 @@ void yield();
 // POSIX fork : page 882 and exec : page 772?
 int cfork();
 
-void cexec( char *path ); // DEPRECATED
+int cexec( char *path ); // DEPRECATED
 
 // exit
 void cexit();
@@ -25,8 +25,8 @@ void craise( sig_t sig );
 
 // POSIXish
 int mqinit( int name ); // need to add mqd to processes list of open mqueues
-void msgsend( int mqd, void* buf, size_t size );
-void msgreceive( int mqd, void* buf, size_t size );
+void msgsend( int mqd, const void* buf, size_t size );
+void msgreceive( int mqd, const void* buf, size_t size );
 
 // write n bytes from x to the file descriptor fd
 int write( int fd, void* x, size_t n );
@@ -34,7 +34,7 @@ int read( int fd, void* x, size_t n );
 
 // filesystem functions
 void disk_wipe();
-int fopen( const char *path );
+int fopen( const char *path, int ofile );
 int fclose( const int fd );
 int fseek( const int fd, uint32_t offset, const int whence );
 

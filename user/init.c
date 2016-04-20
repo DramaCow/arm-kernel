@@ -52,7 +52,7 @@ void init() {
     }
     else if (strncmp(tok, "cat", 3) == 0) {
       tok = strtok( NULL, " \n\r" );
-      int FILE = open( tok );
+      int FILE = fopen( tok, O_EXIST );
       if (FILE != -1) {
         fseek( FILE, 0, SEEK_END );
         int length = ftell( FILE );
@@ -65,10 +65,11 @@ void init() {
           write( STDIO, &buf, n );
         }
 
-        close( FILE );
+        fclose( FILE );
       } 
     }
 
+    craise( SIGPRI0 );
     yield(); // gets rid of reading delay
   }
 

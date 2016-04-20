@@ -14,7 +14,7 @@ int cfork() {
   return f;
 }
 
-void cexec( char *path ) {
+int cexec( char *path ) {
   int r;
 
   asm volatile( "mov r0, %1 \n" 
@@ -61,7 +61,7 @@ int mqinit( int mqd ) {
   return m;
 }
 
-void msgsend( int mqd, void* buf, size_t size ) {
+void msgsend( int mqd, const void* buf, size_t size ) {
   int m;
 
   asm volatile( "mov r0, %1 \n"
@@ -73,13 +73,15 @@ void msgsend( int mqd, void* buf, size_t size ) {
               : "r" (mqd), "r" (buf), "r" (size) 
               : "r0", "r1"                       );
 
-  // receiving will wake sender when ready
-  craise( SIGWAIT );
+  // If fails, try again later
+  if (m == -1) {
+    msgsend( mqd, buf, size );
+  }
 
   return;
 }
 
-void msgreceive( int mqd, void* buf, size_t size ) {
+void msgreceive( int mqd, const void* buf, size_t size ) {
   int m;
 
   asm volatile( "mov r0, %1 \n"
@@ -93,7 +95,6 @@ void msgreceive( int mqd, void* buf, size_t size ) {
 
   // If fails, try again later
   if (m == -1) {
-    yield();
     msgreceive( mqd, buf, size );
   }
 
@@ -135,15 +136,16 @@ void disk_wipe() {
   asm volatile( "svc #11 \n" );
 }
 
-int fopen( const char *path ) {
+int fopen( const char *path, int ofile ) {
   int fd;
 
   asm volatile( "mov r0, %1 \n"
+                "mov r1, %2 \n"
                 "svc #12    \n"
                 "mov %0, r0 \n" 
               : "=r" (fd) 
-              : "r" (path) 
-              : "r0"            );
+              : "r" (path), "r" (ofile) 
+              : "r0"                    );
 
   return fd;
 }
