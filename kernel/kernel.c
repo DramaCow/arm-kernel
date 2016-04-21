@@ -24,7 +24,7 @@ uint32_t fork( ctx_t* ctx ) {
       memcpy( &pcb[ p ].ctx, ctx, sizeof( ctx_t ));
       pcb[ p ].ctx.gpr[ 0 ]         = 0; // return value of child process
       pcb[ p ].pst                  = EXECUTING;
-      pcb[ p ].defp = pcb[ p ].prio = 100;
+      pcb[ p ].defp = pcb[ p ].prio = 0x7FFFFFFF;
 
       rq_add(p);
 
@@ -34,23 +34,25 @@ uint32_t fork( ctx_t* ctx ) {
   return -1;    // error: no available memory
 }
 
-int getProgramEntry( char *path ) {
+int getProgramEntry( char *path, uint32_t *entry, uint32_t *priority ) {
   int ino = path_to_ino( path, ROOT_DIR );
 
   if (ino != -1 ) {
-    inode_t inode;
-    readInode( &inode, ino );
-    uint32_t block[ BLOCK_SIZE/4 ];
-    getDataBlock( (uint8_t*)block, &inode, 0 );
-    return block[ 0 ];
+    int FILE = open( path, O_EXIST );
+    if (FILE != -1) {
+      fread( FILE, (uint8_t*)entry,    4 );
+      fread( FILE, (uint8_t*)priority, 4 );
+      close( FILE );
+      return 0;
+    }
   }
 
   return -1; // failed
 }
 
 int exec( ctx_t* ctx, char *path ) {
-  int entry = getProgramEntry( path );
-  if (entry == -1) 
+  uint32_t entry, priority;
+  if (getProgramEntry( path, &entry, &priority ) == -1) 
     return -1;
 
   int pid = current->pid;
@@ -63,7 +65,7 @@ int exec( ctx_t* ctx, char *path ) {
   current->ctx.pc   = entry;
   current->ctx.sp   = ( uint32_t )( (uint32_t)(&tos_init) - current->pid * 0x00010000 );
   current->pst      = EXECUTING;
-  current->defp = current->prio = 2;
+  current->defp     = current->prio = priority;
 
   memcpy( ctx, &current->ctx, sizeof( ctx_t ) );
 
@@ -176,8 +178,8 @@ void rq_rm( pid_t pid ) {
 } 
 
 void scheduler( ctx_t* ctx ) {
-  qsort( rq, PROCESS_LIMIT, sizeof(pcb_t*), cmp_pcb );
-  //rq_rotate();
+  //qsort( rq, PROCESS_LIMIT, sizeof(pcb_t*), cmp_pcb );
+  rq_rotate();
 
   // There exists a live program in ready queue
   if (rq[ 0 ] != NULL) {
@@ -277,38 +279,46 @@ int mq_receive(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len) {
 // ==================
 
 void createObjFiles() {
-  int FILE;
+  int FILE; int prio;
 
-  FILE = open( "P0", O_CREAT );
+  FILE = open( "P0", O_CREAT ); prio = 1;
   fwrite( FILE, (uint8_t*)&entry_P0, 4 );
+  fwrite( FILE, (uint8_t*)&prio, 4 );
   close( FILE );
 
-  FILE = open( "P1", O_CREAT );
+  FILE = open( "P1", O_CREAT ); prio = 1;
   fwrite( FILE, (uint8_t*)&entry_P1, 4 );
+  fwrite( FILE, (uint8_t*)&prio, 4 );
   close( FILE );
 
-  FILE = open( "P2", O_CREAT );
+  FILE = open( "P2", O_CREAT ); prio = 1;
   fwrite( FILE, (uint8_t*)&entry_P2, 4 );
+  fwrite( FILE, (uint8_t*)&prio, 4 );
   close( FILE );
 
-  FILE = open( "het", O_CREAT );
+  FILE = open( "het", O_CREAT ); prio = 1;
   fwrite( FILE, (uint8_t*)&entry_het, 4 );
+  fwrite( FILE, (uint8_t*)&prio, 4 );
   close( FILE );
 
-  FILE = open( "ping", O_CREAT );
+  FILE = open( "ping", O_CREAT ); prio = 1;
   fwrite( FILE, (uint8_t*)&entry_ping, 4 );
+  fwrite( FILE, (uint8_t*)&prio, 4 );
   close( FILE );
 
-  FILE = open( "pong", O_CREAT );
+  FILE = open( "pong", O_CREAT ); prio = 1;
   fwrite( FILE, (uint8_t*)&entry_pong, 4 );
+  fwrite( FILE, (uint8_t*)&prio, 4 );
   close( FILE );
 
-  FILE = open( "MESSAGE", O_CREAT );
-  fwrite( FILE, (uint8_t*)&entry_MESSAGE, 4 );
+  FILE = open( "blanks", O_CREAT ); prio = 1;
+  fwrite( FILE, (uint8_t*)&entry_blanks, 4 );
+  fwrite( FILE, (uint8_t*)&prio, 4 );
   close( FILE );
   
-  FILE = open( "CABB", O_CREAT );
-  fwrite( FILE, (uint8_t*)&entry_CABB, 4 );
+  FILE = open( "hashs", O_CREAT ); prio = 1;
+  fwrite( FILE, (uint8_t*)&entry_hashs, 4 );
+  fwrite( FILE, (uint8_t*)&prio, 4 );
   close( FILE );
 }
 
@@ -351,7 +361,7 @@ int bfree( daddr32_t a ) { // block free
 	fs.fs_fdbhead  = 0;
   disk_wr( fs.fs_sblkno, (uint8_t*)(&fs), sizeof( fs_t ) ); // update sb
 
-	return 1; // sucess
+	return 1; // success
 }
 
 // === SUPERBLOCK FUNCTIONS ===
@@ -712,7 +722,29 @@ dir_t *getLastDir( dir_t *d, const inode_t *inode ) {
   return d;
 }
 
-int remove_inode( dir_t *child, inode_t *parent, const char *name ) {
+int removable( inode_t *parent, dir_t *child ) {
+  // check removing current directory
+  if (child->d_ino == cwd)
+    return -1;
+
+  // inode already in AIT
+  for (int i = 0; i < AIT_LIMIT; i++) {
+    if (ai[ i ].i_number == child->d_ino && ai[ i ].i_ic.ic_mode != IFZERO)
+      return -1;
+  }	
+
+  // check for non-empty directory
+  inode_t inode;
+  readInode( &inode, child->d_ino );
+
+  if (inode.i_ic.ic_mode == IFDIR && inode.i_ic.ic_size > 64) {
+    return -1; // more entries than just . and ..
+  }
+
+  return child->d_ino;
+}
+
+int remove( dir_t *child, inode_t *parent, const char *name ) {
 	const int bytes = parent->i_ic.ic_size; // number of bytes
 	const int dirs  = bytes / 32;       // number of directories
 
@@ -729,15 +761,17 @@ int remove_inode( dir_t *child, inode_t *parent, const char *name ) {
       addr = getDataBlock( (uint8_t*)dir, parent, BLOCK_SIZE * i );
 		  for (int j = 0; j < 16; j++) {
 			  if (strncmp( name, dir[j].d_name, dir[j].d_namlen >= strlen(name) ? dir[j].d_namlen : strlen(name) ) == 0) {
-          memcpy( child, &dir[ j ], sizeof( dir_t ) );        
+          if (removable( parent, &dir[ j ] ) != -1) {          
+            memcpy( child, &dir[ j ], sizeof( dir_t ) );        
 
-          getLastDir( &dir[ j ], parent ); 
-          disk_wr( addr, (uint8_t*)dir, BLOCK_SIZE );
+            getLastDir( &dir[ j ], parent ); 
+            disk_wr( addr, (uint8_t*)dir, BLOCK_SIZE );
 
-          parent->i_ic.ic_size -= 32;
-          writeInode( parent );
+            parent->i_ic.ic_size -= 32;
+            writeInode( parent );
 
-				  return child->d_ino;
+				    return child->d_ino;
+          }
         }
 		  }
 	  }
@@ -745,15 +779,17 @@ int remove_inode( dir_t *child, inode_t *parent, const char *name ) {
     addr = getDataBlock( (uint8_t*)dir, parent, BLOCK_SIZE * (blks-1) );
 	  for (int j = 0; j < r; j++) {
 		  if (strncmp( name, dir[j].d_name, dir[j].d_namlen >= strlen(name) ? dir[j].d_namlen : strlen(name) ) == 0) {
-        memcpy( child, &dir[ j ], sizeof( dir_t ) );       
+        if (removable( parent, &dir[ j ] ) != -1) { 
+          memcpy( child, &dir[ j ], sizeof( dir_t ) );       
 
-        getLastDir( &dir[ j ], parent ); 
-        disk_wr( addr, (uint8_t*)dir, BLOCK_SIZE );
-        
-        parent->i_ic.ic_size -= 32;
-        writeInode( parent );  
+          getLastDir( &dir[ j ], parent ); 
+          disk_wr( addr, (uint8_t*)dir, BLOCK_SIZE );
+          
+          parent->i_ic.ic_size -= 32;
+          writeInode( parent );  
 
-			  return child->d_ino;
+			    return child->d_ino;
+        }
       }
 	  }
   }
@@ -1045,7 +1081,7 @@ int unlink(char *name) {
   dir_t dir;
   readInode( &inode, cwd );
 
-  if (remove_inode( &dir, &inode, name ) != -1) { 
+  if (remove( &dir, &inode, name ) != -1) { 
     readInode( &inode, dir.d_ino );
     freeDataBlocks( &inode );
     inode.i_ic.ic_mode = IFZERO;
@@ -1121,9 +1157,9 @@ void kernel_handler_irq( ctx_t* ctx ) {
     TIMER0->Timer1IntClr = 0x01;
   }
   else if( id == GIC_SOURCE_UART0 ) {
-    if (pcb[ 0 ].defp == 0) {
-      pcb[ 0 ].defp = 1000;
-      pcb[ 0 ].prio = 1000;
+    if (current->pid != 0) {
+      pcb[ 0 ].defp = 0x7FFFFFFF;
+      pcb[ 0 ].prio = 0x7FFFFFFF;
       scheduler( ctx );
     }
     UART0->ICR = 0x10;
@@ -1339,7 +1375,7 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
 
       dir_t dir;
       inode_t inode; readInode( &inode, cwd );
-      if (remove_inode( &dir, &inode, (char*)ctx->gpr[ 0 ] ) != -1) { 
+      if (remove( &dir, &inode, (char*)ctx->gpr[ 0 ] ) != -1) { 
         addInodeToDirectory( &dest, dir.d_ino, dir.d_name );        
       }
 

@@ -26,8 +26,8 @@
 #include "het.h"
 #include "ping.h"
 #include "pong.h"
-#include "MESSAGE.h"
-#include "CABB.h"
+#include "blanks.h"
+#include "hashs.h"
 
 #define PROCESS_LIMIT 8 // limit on number of processes running at once
 
@@ -63,7 +63,7 @@ typedef struct {
 
 // === PROCESS + SIGNAL FUNCTIONS ===
 uint32_t fork( ctx_t* ctx );
-int getProgramEntry( char *path );
+int getProgramEntry( char *path, uint32_t *entry, uint32_t *priority );
 int exec( ctx_t* ctx, char *path );
 void kill( pid_t pid, sig_t sig );
 

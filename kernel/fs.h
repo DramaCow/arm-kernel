@@ -84,7 +84,8 @@ inode_t *readInode( inode_t *in, int ino );
 inode_t *writeInode( inode_t *inode );
 inode_t *getFreeInode( inode_t *in );
 dir_t *getLastDir( dir_t *d, const inode_t *inode );
-int remove_inode( dir_t *child, inode_t *parent, const char *name );
+int removeable( inode_t *parent, dir_t *child );
+int remove( dir_t *child, inode_t *parent, const char *name );
 int name_to_ino( const char *name, const inode_t *in );
 int path_to_ino( char *path, const int dir );
 int path_to_ino2(  char *path, const int dir ); // also deals with creating new files

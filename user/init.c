@@ -9,8 +9,8 @@ void init() {
     read( STDIO, x, 64);
     tok = strtok(x, " ");
 
-    if      (strncmp(tok, "run", 4) == 0) {       
-      tok = strtok(NULL, " \n\r");
+    if      (strncmp(tok, "run", 4) == 0) { 
+      char *tok = strtok(NULL, " \n\r");
 
       int f = cfork();
       if (f == 0) {
@@ -64,6 +64,18 @@ void init() {
           read( FILE, &buf, n );
           write( STDIO, &buf, n );
         }
+
+        fclose( FILE );
+      } 
+    }
+    else if (strncmp(tok, "setp", 4) == 0) {
+      tok = strtok( NULL, " " );
+      int priority = str2int( tok, strlen( tok ), 10 );
+      int FILE     = fopen( strtok( NULL, " \n\r" ), O_EXIST );
+
+      if (FILE != -1) {
+        fseek( FILE, 4, SEEK_CUR  );
+        write( FILE, &priority, 4 );
 
         fclose( FILE );
       } 
