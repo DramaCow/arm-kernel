@@ -61,6 +61,19 @@ int mqinit( int mqd ) {
   return m;
 }
 
+int mqunlink( int mqd ) {
+  int m;
+
+  asm volatile( "mov r0, %1 \n"
+                "svc #22    \n"
+                "mov %0, r0 \n"
+              : "=r" (m)
+              : "r" (mqd)   
+              : "r0"            );
+
+  return m;
+}
+
 void msgsend( int mqd, const void* buf, size_t size ) {
   int m;
 

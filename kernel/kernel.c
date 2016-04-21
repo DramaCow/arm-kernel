@@ -230,6 +230,14 @@ int mq_open(int name) {
   return -1; // no channels available
 }
 
+int mq_unlink(int m) {
+  if (0 <= m && m <= MSGCHAN_LIMIT) { 
+    mq[ m ].msg_qname = 0;
+    return 0; 
+  }
+  return -1;
+}
+
 int mq_send(mqd_t mqd, uint8_t *msg_ptr, size_t msg_len) {
   mq[ mqd ].msg_lspid = current->pid;
   kill( current->pid, SIGWAIT );
@@ -1357,6 +1365,9 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
     case 0x15 : { // tell
       ctx->gpr[ 0 ] = tell( ctx->gpr[ 0 ] );
       break;
+    }
+    case 0x16 : {
+      ctx->gpr[ 0 ] = mq_unlink( ctx->gpr[ 0 ] );
     }
     default: {
       break;

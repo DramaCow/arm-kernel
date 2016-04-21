@@ -25,6 +25,7 @@ void craise( sig_t sig );
 
 // POSIXish
 int mqinit( int name ); // need to add mqd to processes list of open mqueues
+int mqunlink( int mqd );
 void msgsend( int mqd, const void* buf, size_t size );
 void msgreceive( int mqd, const void* buf, size_t size );
 
