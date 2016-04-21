@@ -100,6 +100,7 @@ int close( const int fd );
 int fwrite( const int fd, const uint8_t *data, const int n );
 int fread( const int fd, uint8_t *data, const int n );
 int lseek( const int fd, uint32_t offset, const int whence );
+int unlink(char *name);
 
 // === EXTRA FUNCTIONS ===
 

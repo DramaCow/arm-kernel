@@ -191,6 +191,19 @@ int fseek( const int fd, uint32_t offset, const int whence ) {
   return r; 
 }
 
+int funlink( const char *name ) {
+  int r;
+
+  asm volatile( "mov r0, %1 \n"
+                "svc #18    \n" 
+                "mov %0, r0 \n"
+              : "=r" (r) 
+              : "r" (name)
+              : "r0"            );
+
+  return r;
+}
+
 int ftell( const int fd ) {
   int r;
 
@@ -237,19 +250,6 @@ int cd( const char *path ) {
                 "mov %0, r0 \n"
               : "=r" (r) 
               : "r" (path)
-              : "r0"            );
-
-  return r;
-}
-
-int rm( const char *name ) {
-  int r;
-
-  asm volatile( "mov r0, %1 \n"
-                "svc #18    \n" 
-                "mov %0, r0 \n"
-              : "=r" (r) 
-              : "r" (name)
               : "r0"            );
 
   return r;

@@ -38,6 +38,7 @@ void disk_wipe();
 int fopen( const char *path, int ofile );
 int fclose( const int fd );
 int fseek( const int fd, uint32_t offset, const int whence );
+int funlink( const char *name );
 
 int ftell( const int fd );
 
@@ -49,7 +50,6 @@ void pwd();
 void ls();
 int mkdir( const char *name );
 int cd( const char *path );
-int rm( const char *name );
 int mv( const char *src, const char *dest );
 int cp( const char *src, const char *dest );
 

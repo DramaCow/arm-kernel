@@ -42,7 +42,7 @@ void init() {
       cd( strtok( NULL, " \n\r" ) );
     }
     else if (strncmp(tok, "rm", 2) == 0) {
-      rm( strtok( NULL, " \n\r" ) );
+      funlink( strtok( NULL, " \n\r" ) );
     }
     else if (strncmp(tok, "mv", 2) == 0) {
       mv( strtok( NULL, " \n\r" ), strtok( NULL, " \n\r" ) );

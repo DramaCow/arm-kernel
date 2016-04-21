@@ -1037,6 +1037,27 @@ int lseek( const int fd, uint32_t offset, const int whence ) {
   return current->fd[ fd ]->o_head;
 }
 
+int unlink(char *name) {
+  if ( name[0] == '.' )
+    return -1;
+
+  inode_t inode;
+  dir_t dir;
+  readInode( &inode, cwd );
+
+  if (remove_inode( &dir, &inode, name ) != -1) { 
+    readInode( &inode, dir.d_ino );
+    freeDataBlocks( &inode );
+    inode.i_ic.ic_mode = IFZERO;
+    inode.i_ic.ic_size = 0;
+    writeInode( &inode );  
+
+    return 0;
+  }
+
+  return -1;
+}
+
 int tell( const int fd ) {
   // validate file descriptor
   if (fd < 0 || fd >= FDT_LIMIT) return -1;
@@ -1300,23 +1321,8 @@ void kernel_handler_svc( ctx_t* ctx, uint32_t id ) {
 
       break;
     }
-    case 0x12 : { // rm
-      if ( ((char*)ctx->gpr[ 0 ])[0] == '.' ) {
-        ctx->gpr[ 0 ] = -1;
-        break;
-      }
-
-      inode_t inode;
-      dir_t dir;
-      readInode( &inode, cwd );
-      if (remove_inode( &dir, &inode, (char*)ctx->gpr[ 0 ] ) != -1) { 
-        readInode( &inode, dir.d_ino );
-        freeDataBlocks( &inode );
-        inode.i_ic.ic_mode = IFZERO;
-        inode.i_ic.ic_size = 0;
-        writeInode( &inode );  
-      }
-
+    case 0x12 : { // unlink
+      ctx->gpr[ 0 ] = unlink( (char*)ctx->gpr[ 0 ] );
       break;
     }
     case 0x13 : { // mv   
