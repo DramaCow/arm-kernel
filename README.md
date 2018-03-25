@@ -13,7 +13,7 @@
 - Files resize as necessary - can use posix file functions (open, close, write, read, lseek, unlink)
 - Supports direct and indirect blocks (filesize limit of ~1GB, however, has only been tested to around 400kB).
 
-- I particularly like how data blocks are allocated to inodes / deallocated from inodes:
+- Data block allocation to inodes / deallocation from inodes:
   - linked list of available data block addresses maintained in superblock. Head of list
     points to a data block containing another list of available data block addresses etc.
   - When allocating a block: if list size >1 then remove address at back of list, else copy 
